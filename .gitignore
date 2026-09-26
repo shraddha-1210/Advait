@@ -1,0 +1,19 @@
+# Drunix is cloned locally, never vendored (CLAUDE.md §5). Generates real key/MSP/TLS material.
+/drunix/
+# Chaincode vendoring produced by packaging
+chaincode/**/vendor/
+# Node / frontend
+node_modules/
+dist/
+.vite/
+# Gateway build output
+gateway/bin/
+# Local secrets / keys generated for the demo oracle
+*.key
+.env
+.env.*
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
