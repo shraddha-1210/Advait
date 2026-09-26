@@ -3,7 +3,7 @@
 # chaincode and confirm the unit tests fail. A mutation that survives means
 # the tests do not actually protect that property.
 set -u
-SRC=/mnt/c/Advait/chaincode/pvp
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/chaincode/pvp"
 WORK=$(mktemp -d)
 pass=0; fail=0
 mutate() { # name file perl-substitution
