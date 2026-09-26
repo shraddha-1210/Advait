@@ -1,0 +1,14 @@
+FROM golang:1.23-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends perl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /advaita
+
+COPY chaincode/pvp ./chaincode/pvp
+COPY scripts/mutation-check.sh ./scripts/mutation-check.sh
+
+RUN chmod +x ./scripts/mutation-check.sh
+
+CMD ["bash", "./scripts/mutation-check.sh"]
