@@ -214,7 +214,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 
 ## 10. How to run
 
-These are the commands we ran. Run them inside WSL (Ubuntu) as root, with the repo at `/mnt/c/Advait`. `scripts/mutation-check.sh` assumes that path.
+These are the commands we ran. Run them inside WSL (Ubuntu) as root, starting from the Advaita repository root.
 
 **Prerequisites (Windows)**
 - Docker Desktop with WSL2 integration enabled for the Ubuntu distro.
@@ -247,14 +247,13 @@ cd /root/drunix/drunix-network/test-network
 
 **4. Build the gateway tools and create the oracle key**
 ```bash
-cd /mnt/c/Advait/gateway && go build -o /root/bin/ ./cmd/...
-cd /mnt/c/Advait && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
+cd gateway && go build -o /root/bin/ ./cmd/...
+cd .. && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
 ```
 `oracle.key` is git-ignored. Only `oracle.pub` is committed.
 
 **5. Deploy the chaincode, initialise the ledger, publish a rate**
 ```bash
-cd /mnt/c/Advait
 bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer')
 /root/bin/pvpctl init network/oracle/oracle.pub              # once only; a second run returns ERR_ALREADY_INITIALIZED
 /root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000
@@ -263,7 +262,7 @@ bash network/deploy-cc.sh 1.0                                # policy AND('Org1M
 
 **6. Start the gateway**
 ```bash
-cd /mnt/c/Advait/gateway && /root/bin/gateway      # listens on :8080
+cd gateway && /root/bin/gateway      # listens on :8080
 ```
 From Windows or WSL:
 ```bash
@@ -275,13 +274,14 @@ Other endpoints: `GET /api/health`, `/api/audit`, `/api/quote?usd=&seq=`, `/api/
 **7. Run the tests**
 ```bash
 # Chaincode unit tests
-cd /mnt/c/Advait/chaincode/pvp && go vet ./... && go test ./... -count=1 -v
+cd chaincode/pvp && go vet ./... && go test ./... -count=1 -v
+cd ../..
 
 # Mutation check (works on a temporary copy; the repo is not modified)
-bash /mnt/c/Advait/scripts/mutation-check.sh
+bash scripts/mutation-check.sh
 
 # Integration tests (network and gateway must be running)
-cd /mnt/c/Advait/gateway && go test -tags integration ./integration/ -count=1 -v
+cd gateway && go test -tags integration ./integration/ -count=1 -v
 
 # Also run the peer-down test, which stops and restarts BankFX's peer container
 RUN_DISRUPTIVE=1 go test -tags integration ./integration/ -count=1 -v

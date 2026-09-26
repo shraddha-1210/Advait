@@ -33,8 +33,9 @@ type AttackReport struct {
 	Payload []string         `json:"payload"`           // the exact chaincode arguments sent
 	Result  *WriteResult     `json:"result"`            // the attack transaction's real outcome
 	Refused bool             `json:"refused"`
-	// ExpectedCode is true when the refusal came from the defence this row
-	// is about (Result.Outcome.Code == Expect).
+	// ExpectedCode is true when the refusal matches the expected defence condition
+	// for this threat matrix row (typically Result.Outcome.Code == Expect, or for
+	// bank-offline, any endorsement-stage refusal).
 	ExpectedCode bool   `json:"expectedCode"`
 	Note         string `json:"note,omitempty"`
 }
@@ -403,8 +404,16 @@ func (s *Server) bankOffline(rep *AttackReport) (*AttackReport, error) {
 	rep.Result = res
 	rep.Refused = !res.Outcome.OK
 	// Any endorsement-stage transport failure counts: the peer is gone.
-	rep.ExpectedCode = !res.Outcome.OK && res.Outcome.Stage == "endorse"
+	rep.ExpectedCode = isBankOfflineExpected(res.Outcome)
 	return rep, nil
+}
+
+// isBankOfflineExpected returns true if the outcome represents an expected rejection
+// for the bank-offline attack. The expected condition is an unsuccessful
+// endorsement-stage result (!o.OK && o.Stage == "endorse"), regardless of the specific
+// transport error code (e.g., ENDORSER_UNAVAILABLE vs ENDORSE_FAILED).
+func isBankOfflineExpected(o ledger.Outcome) bool {
+	return !o.OK && o.Stage == "endorse"
 }
 
 func docker(args ...string) (string, error) {
