@@ -214,7 +214,10 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 
 ## 10. How to run
 
-These are the commands we ran. Run them inside WSL (Ubuntu) as root, starting from the Advaita repository root.
+These are the commands we ran. Run them inside WSL (Ubuntu) as root. Several steps change directory, so first point `ADVAITA` at your checkout (ours is `/mnt/c/Advait`). Every later step `cd`s from it:
+```bash
+export ADVAITA=/mnt/c/Advait   # path to this repository inside WSL
+```
 
 **Prerequisites (Windows)**
 - Docker Desktop with WSL2 integration enabled for the Ubuntu distro.
@@ -247,13 +250,14 @@ cd /root/drunix/drunix-network/test-network
 
 **4. Build the gateway tools and create the oracle key**
 ```bash
-cd gateway && go build -o /root/bin/ ./cmd/...
-cd .. && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
+cd "$ADVAITA"/gateway && go build -o /root/bin/ ./cmd/...
+cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
 ```
 `oracle.key` is git-ignored. Only `oracle.pub` is committed.
 
 **5. Deploy the chaincode, initialise the ledger, publish a rate**
 ```bash
+cd "$ADVAITA"
 bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer')
 /root/bin/pvpctl init network/oracle/oracle.pub              # once only; a second run returns ERR_ALREADY_INITIALIZED
 /root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000
@@ -262,7 +266,7 @@ bash network/deploy-cc.sh 1.0                                # policy AND('Org1M
 
 **6. Start the gateway**
 ```bash
-cd gateway && /root/bin/gateway      # listens on :8080
+cd "$ADVAITA"/gateway && /root/bin/gateway      # listens on :8080
 ```
 From Windows or WSL:
 ```bash
@@ -273,21 +277,23 @@ Other endpoints: `GET /api/health`, `/api/audit`, `/api/quote?usd=&seq=`, `/api/
 
 **7. Run the tests**
 ```bash
+# In a second WSL shell (the gateway from step 6 keeps running), set ADVAITA again
+export ADVAITA=/mnt/c/Advait
+
 # Chaincode unit tests
-cd chaincode/pvp && go vet ./... && go test ./... -count=1 -v
-cd ../..
+cd "$ADVAITA"/chaincode/pvp && go vet ./... && go test ./... -count=1 -v
 
 # Mutation check (works on a temporary copy; the repo is not modified)
-bash scripts/mutation-check.sh
+bash "$ADVAITA"/scripts/mutation-check.sh
 
 # Integration tests (network and gateway must be running)
-cd gateway && go test -tags integration ./integration/ -count=1 -v
+cd "$ADVAITA"/gateway && go test -tags integration ./integration/ -count=1 -v
 
 # Also run the peer-down test, which stops and restarts BankFX's peer container
 RUN_DISRUPTIVE=1 go test -tags integration ./integration/ -count=1 -v
 ```
 
-To start over from an empty ledger, run `./network.sh down` and repeat steps 3 and 5. We have not scripted this reset yet.
+To start over from an empty ledger, run `./network.sh down` in `/root/drunix/drunix-network/test-network` and repeat steps 3 and 5. We have not scripted this reset yet.
 
 ## 11. Limitations and future work
 
