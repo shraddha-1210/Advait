@@ -1,0 +1,4 @@
+# vendor/ is git-ignored and only exists in some local checkouts. Keep it out
+# so the image behaves the same as one built from a fresh clone.
+chaincode/**/vendor/
+drunix/

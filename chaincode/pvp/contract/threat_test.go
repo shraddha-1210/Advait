@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -472,4 +473,40 @@ func TestInvariant_HoldsAfterEveryOperation(t *testing.T) {
 		t.Fatalf("sequence should exercise both outcomes: settled=%d rejected=%d", settled, rejected)
 	}
 	t.Logf("300 steps: %d settlements committed, %d attempts rejected, invariant held after every step", settled, rejected)
+}
+
+// Griefing (documented limitation, README §11): a hostile bank instructs a
+// trade ID first, with terms the honest bank never agreed to (a correctly
+// priced 9,000 USD trade instead of 10,000 USD). The honest instruction is
+// refused as a mismatch, so the trade is stuck in PENDING_MATCH with only the
+// hostile bank's instruction. The attack blocks the trade but cannot move value.
+func TestThreat_Griefing_HostileInstructionBlocksLegitimateTrade(t *testing.T) {
+	f := newFixtureWithRate(t)
+	before := f.balances().Balances
+
+	// Hostile BankFX instructs GRIEVE-1 first, for 9,000 USD.
+	f.mustOK(f.instruct(mspFX, f.trade("GRIEVE-1", BankFX, BankFX, 9_000_00, 1)))
+
+	// Honest BankIN instructs the terms it actually agreed: 10,000 USD.
+	honest := f.trade("GRIEVE-1", BankIN, BankFX, 10_000_00, 1)
+	f.mustReject(ErrInstructionMismatch, func() txResult { return f.instruct(mspIN, honest) })
+
+	tr := f.tradeRecord("GRIEVE-1")
+	if tr.Status != StatusPendingMatch {
+		t.Fatalf("status = %s, want %s", tr.Status, StatusPendingMatch)
+	}
+	if !reflect.DeepEqual(tr.InstructedBy, []string{BankFX}) {
+		t.Fatalf("instructedBy = %v, want [%s]", tr.InstructedBy, BankFX)
+	}
+
+	// Neither bank can settle a trade only one side has instructed.
+	f.mustReject(ErrUnilateral, func() txResult { return f.settle(mspIN, "GRIEVE-1") })
+	f.mustReject(ErrUnilateral, func() txResult { return f.settle(mspFX, "GRIEVE-1") })
+
+	// mustReject covers the refused calls; this also covers the hostile
+	// instruction that succeeded.
+	if after := f.balances().Balances; !reflect.DeepEqual(before, after) {
+		t.Fatalf("balances moved during griefing: before %v, after %v", before, after)
+	}
+	f.mustInvariantHolds()
 }

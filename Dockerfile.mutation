@@ -1,0 +1,16 @@
+FROM golang:1.23-bookworm
+
+# perl and md5sum (used by mutation-check.sh) are already in this base image.
+
+WORKDIR /advaita
+
+# Download modules at build time so `docker run` works without network.
+COPY chaincode/pvp/go.mod chaincode/pvp/go.sum ./chaincode/pvp/
+RUN cd chaincode/pvp && go mod download
+
+COPY chaincode/pvp ./chaincode/pvp
+COPY scripts/mutation-check.sh ./scripts/mutation-check.sh
+
+RUN chmod +x ./scripts/mutation-check.sh
+
+CMD ["bash", "./scripts/mutation-check.sh"]

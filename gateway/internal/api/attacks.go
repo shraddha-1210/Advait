@@ -34,7 +34,9 @@ type AttackReport struct {
 	Result  *WriteResult     `json:"result"`            // the attack transaction's real outcome
 	Refused bool             `json:"refused"`
 	// ExpectedCode is true when the refusal came from the defence this row
-	// is about (Result.Outcome.Code == Expect).
+	// is about: Result.Outcome.Code == Expect, or for bank-offline an
+	// endorsement-stage ENDORSER_UNAVAILABLE or ENDORSE_FAILED (see
+	// isBankOfflineExpected).
 	ExpectedCode bool   `json:"expectedCode"`
 	Note         string `json:"note,omitempty"`
 }
@@ -71,7 +73,7 @@ var catalogue = []AttackInfo{
 	{"reinit", "Value-conservation breach (create value)", "BankFX (hostile)",
 		"Re-run InitLedger with its own oracle key and a huge USD balance, i.e. mint money.", "ERR_ALREADY_INITIALIZED", "endorse"},
 	{"bank-offline", "Peer down (one bank offline)", "Network failure",
-		"Stop BankFX's endorsing peer, then have BankIN try to settle a matched trade.", "ENDORSER_UNAVAILABLE", "endorse"},
+		"Stop BankFX's endorsing peer, then have BankIN try to settle a matched trade.", "ENDORSER_UNAVAILABLE or ENDORSE_FAILED", "endorse"},
 }
 
 func (s *Server) attackCatalogue(w http.ResponseWriter, r *http.Request) {
@@ -380,14 +382,27 @@ func (s *Server) bankOffline(rep *AttackReport) (*AttackReport, error) {
 		if out, err := docker("start", name); err != nil {
 			return fmt.Sprintf("RESTART FAILED: %v %s", err, out)
 		}
-		// Ready means BankIN's gateway can again collect endorsements from
-		// BOTH orgs (service discovery has re-learned BankFX's peer). Probe
-		// with an endorsement of a read-only call that is never submitted.
-		start := time.Now()
+		// Ready means EACH bank's gateway can again collect endorsements from
+		// both orgs. Each bank's client talks to its own peer, so BankFX's
+		// path goes through the peer that just restarted, and its service
+		// discovery re-learns the installed chaincode later than BankIN's
+		// does. Probe both with an endorsement of a read-only call that is
+		// never submitted, and require several passes in a row, because one
+		// success right after a restart has proven not to be stable.
+		const needStreak = 3
+		start, streak := time.Now(), 0
 		for time.Since(start) < 120*time.Second {
-			if e, _ := s.L.Endorse(ledger.BankIN, "GetConfig"); e != nil {
-				return fmt.Sprintf("BankFX peer restarted; both orgs endorsing again after %s", time.Since(start).Round(time.Second))
+			e1, _ := s.L.Endorse(ledger.BankIN, "GetConfig")
+			e2, _ := s.L.Endorse(ledger.BankFX, "GetConfig")
+			if e1 != nil && e2 != nil {
+				if streak++; streak == needStreak {
+					return fmt.Sprintf("BankFX peer restarted; both banks' gateways endorsing again (%d checks in a row) after %s",
+						needStreak, time.Since(start).Round(time.Second))
+				}
+				time.Sleep(2 * time.Second)
+				continue
 			}
+			streak = 0
 			time.Sleep(3 * time.Second)
 		}
 		return "BankFX peer restarted but the network had not recovered after 120s"
@@ -402,9 +417,22 @@ func (s *Server) bankOffline(rep *AttackReport) (*AttackReport, error) {
 	}
 	rep.Result = res
 	rep.Refused = !res.Outcome.OK
-	// Any endorsement-stage transport failure counts: the peer is gone.
-	rep.ExpectedCode = !res.Outcome.OK && res.Outcome.Stage == "endorse"
+	rep.ExpectedCode = isBankOfflineExpected(res.Outcome)
 	return rep, nil
+}
+
+// isBankOfflineExpected reports whether a refusal is the one the bank-offline
+// row is about: endorsement could not be collected because a peer is gone.
+// With the peer stopped, decodeEndorseError returns either
+// ENDORSER_UNAVAILABLE or ENDORSE_FAILED, depending on how the gateway words
+// the transport error. Other endorse-stage codes are NOT accepted: a chaincode
+// rejection (ERR_...) or PROPOSAL_ERROR is also reported at stage "endorse",
+// but it means something other than the peer being down refused the trade.
+func isBankOfflineExpected(o ledger.Outcome) bool {
+	if o.OK || o.Stage != "endorse" {
+		return false
+	}
+	return o.Code == "ENDORSER_UNAVAILABLE" || o.Code == "ENDORSE_FAILED"
 }
 
 func docker(args ...string) (string, error) {
