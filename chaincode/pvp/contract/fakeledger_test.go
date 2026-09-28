@@ -11,6 +11,7 @@ import (
 	"github.com/hyperledger/fabric-chaincode-go/v2/shim"
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 	"github.com/hyperledger/fabric-protos-go-apiv2/ledger/queryresult"
+	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -23,6 +24,11 @@ import (
 //   - GetState and range queries read COMMITTED state only. Fabric does not
 //     let a transaction read its own writes; a chaincode bug that relies on
 //     doing so will fail these tests the same way it would fail on a peer.
+//   - Range scans behave like Drunix's SQL state database, where we deploy
+//     (statesqldb.go): a plain scan returns at most drunixScanCap rows, and
+//     rows come back in no particular order (reverse key order here). A
+//     paginated scan returns up to pageSize rows, also unordered. As in
+//     Fabric, a transaction may not both run a paginated query and write.
 //
 // It is not a mock: there are no canned return values. Balances, sums and
 // rejections all come from the real chaincode running against this state.
@@ -100,7 +106,13 @@ type txStub struct {
 	ts     time.Time
 	writes map[string][]byte
 	events map[string][]byte
+
+	paginated bool // ran a paginated query (then it must not write)
 }
+
+// drunixScanCap is the page size Drunix hard-codes for a plain range scan
+// (statesqldb.GetStateRangeScanIterator).
+const drunixScanCap = 10
 
 func (s *txStub) GetTxID() string { return s.txID }
 
@@ -123,6 +135,9 @@ func (s *txStub) PutState(key string, value []byte) error {
 	}
 	if value == nil {
 		return fmt.Errorf("nil value for %q", key)
+	}
+	if s.paginated {
+		return fmt.Errorf("txid [%s]: unsuppored transaction. Transaction has already performed a paginated query. Writes are not allowed", s.txID)
 	}
 	s.writes[key] = append([]byte(nil), value...)
 	return nil
@@ -158,6 +173,32 @@ func (s *txStub) SplitCompositeKey(compositeKey string) (string, []string, error
 }
 
 func (s *txStub) GetStateByPartialCompositeKey(objectType string, keys []string) (shim.StateQueryIteratorInterface, error) {
+	kvs, err := s.scan(objectType, keys, drunixScanCap)
+	if err != nil {
+		return nil, err
+	}
+	return &kvIterator{kvs: kvs}, nil
+}
+
+func (s *txStub) GetStateByPartialCompositeKeyWithPagination(objectType string, keys []string, pageSize int32, bookmark string) (shim.StateQueryIteratorInterface, *peer.QueryResponseMetadata, error) {
+	if len(s.writes) > 0 {
+		return nil, nil, fmt.Errorf("txid [%s]: unsuppored transaction. Paginated queries are supported only in a read-only transaction", s.txID)
+	}
+	if bookmark != "" {
+		// Drunix's scanner ignores where a bookmark points; the chaincode must not rely on one.
+		return nil, nil, fmt.Errorf("bookmarks are not supported by this fake (they do not resume a scan on Drunix)")
+	}
+	s.paginated = true
+	kvs, err := s.scan(objectType, keys, int(pageSize))
+	if err != nil {
+		return nil, nil, err
+	}
+	return &kvIterator{kvs: kvs}, &peer.QueryResponseMetadata{FetchedRecordsCount: int32(len(kvs))}, nil
+}
+
+// scan returns up to limit committed rows under a composite-key prefix, in
+// REVERSE key order so the chaincode cannot depend on the order it gets.
+func (s *txStub) scan(objectType string, keys []string, limit int) ([]*queryresult.KV, error) {
 	prefix, err := shim.CreateCompositeKey(objectType, keys)
 	if err != nil {
 		return nil, err
@@ -168,12 +209,15 @@ func (s *txStub) GetStateByPartialCompositeKey(objectType string, keys []string)
 			ks = append(ks, k)
 		}
 	}
-	sort.Strings(ks)
+	sort.Sort(sort.Reverse(sort.StringSlice(ks)))
+	if len(ks) > limit {
+		ks = ks[:limit]
+	}
 	kvs := make([]*queryresult.KV, 0, len(ks))
 	for _, k := range ks {
 		kvs = append(kvs, &queryresult.KV{Key: k, Value: append([]byte(nil), s.ledger.committed[k]...)})
 	}
-	return &kvIterator{kvs: kvs}, nil
+	return kvs, nil
 }
 
 type kvIterator struct {

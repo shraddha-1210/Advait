@@ -355,6 +355,42 @@ func TestSingleEndorsementIsInvalidatedByNetwork(t *testing.T) {
 	assertLedgerSane(t, c)
 }
 
+// GET /api/trades/{id} reads one trade directly. It must find a trade created
+// a moment ago and return 404 for an unknown ID.
+func TestGetTradeByID(t *testing.T) {
+	id := tradeID("IT-GET")
+	inr := instructBoth(t, id, "BANKFX", 123_00)
+	var v struct {
+		Trade struct {
+			TradeID      string   `json:"tradeId"`
+			Status       string   `json:"status"`
+			USDAmount    int64    `json:"usdAmount"`
+			INRAmount    int64    `json:"inrAmount"`
+			InstructedBy []string `json:"instructedBy"`
+		} `json:"trade"`
+		Instructions map[string]struct {
+			SubmitterMSP string `json:"submitterMsp"`
+			TxID         string `json:"txId"`
+		} `json:"instructions"`
+	}
+	call(t, "GET", "/api/trades/"+id, nil, &v)
+	if v.Trade.TradeID != id || v.Trade.Status != "MATCHED" || v.Trade.USDAmount != 123_00 || v.Trade.INRAmount != inr {
+		t.Fatalf("GET /api/trades/%s returned %+v", id, v.Trade)
+	}
+	if len(v.Instructions) != 2 || v.Instructions["BANKIN"].TxID == "" || v.Instructions["BANKFX"].TxID == "" {
+		t.Fatalf("want both banks' stored instructions, got %+v", v.Instructions)
+	}
+
+	resp, err := http.Get(baseURL + "/api/trades/NO-SUCH-" + id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown trade: want 404, got %d", resp.StatusCode)
+	}
+}
+
 // Every threat-matrix row is refused with its own code, moves nothing, and
 // leaves value conserved on both peers.
 func TestThreatMatrixOnRealNetwork(t *testing.T) {
