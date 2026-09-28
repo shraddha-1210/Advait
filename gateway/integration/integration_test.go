@@ -450,8 +450,14 @@ func TestBankOfflineBlocksSettlement(t *testing.T) {
 	var rep attackReport
 	call(t, "POST", "/api/attacks/bank-offline", nil, &rep)
 	o := rep.Result.Outcome
-	if o.OK || o.Stage != "endorse" {
-		t.Fatalf("settlement with BankFX offline: want endorse-stage failure, got ok=%v stage=%s code=%s", o.OK, o.Stage, o.Code)
+	// Only a transport failure counts. A chaincode ERR_... or PROPOSAL_ERROR is
+	// also reported at stage "endorse" but would mean something else refused.
+	if o.OK || o.Stage != "endorse" || (o.Code != "ENDORSER_UNAVAILABLE" && o.Code != "ENDORSE_FAILED") {
+		t.Fatalf("settlement with BankFX offline: want endorse-stage ENDORSER_UNAVAILABLE or ENDORSE_FAILED, got ok=%v stage=%s code=%s (%s)",
+			o.OK, o.Stage, o.Code, o.Message)
+	}
+	if !rep.ExpectedCode {
+		t.Fatalf("gateway reported expectedCode=false for a %s refusal", o.Code)
 	}
 	if rep.Result.BalancesMoved {
 		t.Fatal("balances moved while BankFX was offline")

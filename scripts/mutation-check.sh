@@ -20,6 +20,15 @@ mutate() { # name file perl-substitution
     printf "  %-58s killed\n" "$name"; pass=$((pass+1))
   fi
 }
+# Baseline: the UNMODIFIED copy must pass first. Otherwise every mutation
+# "fails" for an unrelated reason (e.g. modules cannot be downloaded) and is
+# miscounted as killed, which reports 21/21 without running a single test.
+rm -rf "$WORK/pvp"; cp -r "$SRC" "$WORK/pvp"
+if ! baseline=$(cd "$WORK/pvp" && go test ./contract/ -count=1 2>&1); then
+  echo "ABORT: unit tests fail on the unmodified chaincode, so mutation results would be meaningless:" >&2
+  printf '%s\n' "$baseline" | tail -5 >&2
+  rm -rf "$WORK"; exit 2
+fi
 echo "Mutation check (each line = one injected bug):"
 mutate "receiver never credited (value destroyed)"   contract.go 's/post\.set\(l\.To, l\.Ccy, to\)/_ = to/'
 mutate "only the first leg is applied"                contract.go 's/for _, l := range legs \{\n\t\tfrom, err/for _, l := range legs[:1] {\n\t\tfrom, err/'

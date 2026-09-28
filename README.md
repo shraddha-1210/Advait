@@ -153,7 +153,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 
 ### How we checked that the tests catch real bugs
 
-`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 21 injected bugs are caught.
+`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 21 injected bugs are caught. The script first runs the tests on the unmodified copy and aborts if they fail, so a build or download error cannot be counted as a caught bug.
 
 ## 6. Impact
 
@@ -178,7 +178,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - The Drunix test network (commit `ddc0eae`) running locally in Docker on Windows 11 with WSL2: 1 orderer, 2 orgs, each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB.
 - The `pvp` chaincode, deployed with policy `AND('Org1MSP.peer','Org2MSP.peer')`.
 - The gateway HTTP API, including all attack scenarios.
-- 38 chaincode unit tests (plus 9 subtests), the 21-bug mutation check, and 7 integration tests against the live network (the threat-matrix test has 13 subtests). The peer-down test stops and restarts a real peer container.
+- 39 chaincode unit tests (plus 9 subtests), 1 gateway unit test (`gateway/internal/api/attacks_test.go`, 13 subtests covering which refusals count as "peer offline"), the 21-bug mutation check, and 7 integration tests against the live network (the threat-matrix test has 13 subtests). The peer-down test stops and restarts a real peer container.
 
 **Simulated**
 - All balances. The opening balances are 500,000,000.00 INR for BankIN and 5,000,000.00 USD for BankFX. No real money or liquidity is involved.
@@ -209,7 +209,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 | Chaincode | Go 1.23 module, `fabric-contract-api-go/v2` v2.2.0, `fabric-chaincode-go/v2` v2.0.0 | Go is what the Drunix samples use and what we verified on this network. |
 | Rate signatures | Ed25519 (Go standard library) | Deterministic verification. The chaincode and the signer share one payload definition (`chaincode/pvp/attest`). |
 | Gateway | Go, `fabric-gateway` v1.10.0, `net/http` | Same version as the Drunix Go gateway sample, which we ran successfully against this network. |
-| Runtime | Docker Desktop with WSL2 (Ubuntu), Go 1.26.1 inside WSL | Drunix's scripts need Linux. |
+| Runtime | Docker Desktop with WSL2 (Ubuntu), Go 1.26.1 inside WSL (the minimum Drunix `ddc0eae` builds with; the gateway module needs >= 1.25.0) | Drunix's scripts need Linux. |
 | Money | Integer minor units (paise, cents), with big-integer math for FX conversion | No floats. Overflow cannot silently wrap. |
 
 ## 10. How to run
@@ -224,8 +224,14 @@ export ADVAITA=/mnt/c/Advait   # path to this repository inside WSL
 - About 10 GB of RAM for WSL. We set `memory=10GB` in `%USERPROFILE%\.wslconfig`. The network runs 11 containers.
 
 **1. Tools inside WSL**
+Install Go 1.26.1. Drunix at commit `ddc0eae` requires Go >= 1.26.1 (its `go.mod`), the gateway >= 1.25.0 and the chaincode >= 1.23.0, so 1.26.1 covers all three. Distro `golang-go` packages are often older (Debian bookworm ships 1.19), so use the official tarball:
 ```bash
-apt-get update && apt-get install -y golang-go jq make build-essential
+apt-get update && apt-get install -y curl jq make build-essential
+curl -fsSLo /tmp/go1.26.1.tgz https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+echo "031f088e5d955bab8657ede27ad4e3bc5b7c1ba281f05f245bcc304f327c987a  /tmp/go1.26.1.tgz" | sha256sum -c -
+rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go1.26.1.tgz
+echo 'export PATH=/usr/local/go/bin:$PATH' >> ~/.bashrc && export PATH=/usr/local/go/bin:$PATH
+go version   # go version go1.26.1 linux/amd64
 ```
 
 **2. Build Drunix binaries that match the Docker images**
@@ -286,6 +292,9 @@ cd "$ADVAITA"/chaincode/pvp && go vet ./... && go test ./... -count=1 -v
 # Mutation check (works on a temporary copy; the repo is not modified)
 bash "$ADVAITA"/scripts/mutation-check.sh
 
+# Or run the mutation check in Docker (Go 1.23, modules fetched at build time, so the run needs no network)
+cd "$ADVAITA" && docker build -f Dockerfile.mutation -t advaita-mut . && docker run --rm advaita-mut
+
 # Integration tests (network and gateway must be running)
 cd "$ADVAITA"/gateway && go test -tags integration ./integration/ -count=1 -v
 
@@ -304,7 +313,7 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 - **No real CBDC or central bank money.** At most the design could be called CBDC-ready. Nothing is integrated.
 - **Only two MSPs.** The Oracle and the Auditor are not their own MSPs on the channel. The Oracle is a pinned key, and the audit endpoint reads the ledger with BankIN's identity.
 - **Compliance records and private data are not built.**
-- **Peer-down error label.** When BankFX's peer is stopped, the refusal sometimes comes back as `ENDORSE_FAILED` and sometimes as `ENDORSER_UNAVAILABLE`. The attack catalogue expects `ENDORSER_UNAVAILABLE`, so its `expectedCode` flag can read `false` on a correct refusal. The integration test accepts any endorsement-stage refusal. This is a labelling issue in the gateway, not a security gap.
+- **Peer-down error label.** When BankFX's peer is stopped, the refusal sometimes comes back as `ENDORSER_UNAVAILABLE` and sometimes as `ENDORSE_FAILED`, depending on how the Fabric gateway words the transport error. The gateway's `expectedCode` flag and the integration test accept exactly those two codes at the endorsement stage. A chaincode `ERR_...` code or `PROPOSAL_ERROR` does not count, even though it is also reported at that stage. `ENDORSE_FAILED` is the gateway's catch-all for endorsement errors that carry no chaincode code, so on its own it cannot tell a stopped peer from another transport failure. The live test can, because it stops the peer itself.
 - **Trusted bootstrap.** `InitLedger` configuration (bank MSPs, oracle key, opening balances) is trusted once at deployment. It cannot be changed afterwards.
 - **Griefing.** A hostile bank that instructs a trade ID first with bad terms can block the honest bank's instruction for that trade. The system stays safe (nothing moves), but there is no cancel function.
 - **One gateway, both banks' keys.** This is a demo simplification.

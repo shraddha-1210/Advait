@@ -31,13 +31,49 @@ func TestIsBankOfflineExpected(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "other error code with endorse stage is accepted (rule is endorsement stage refusal)",
+			name: "unknown error code with endorse stage is NOT accepted",
 			outcome: ledger.Outcome{
 				OK:    false,
 				Stage: "endorse",
 				Code:  "ERR_CUSTOM_REJECTION",
 			},
-			expected: true,
+			expected: false,
+		},
+		{
+			name: "PROPOSAL_ERROR with endorse stage is NOT accepted",
+			outcome: ledger.Outcome{
+				OK:    false,
+				Stage: "endorse",
+				Code:  "PROPOSAL_ERROR",
+			},
+			expected: false,
+		},
+		{
+			name: "chaincode rejection ERR_UNILATERAL with endorse stage is NOT accepted",
+			outcome: ledger.Outcome{
+				OK:    false,
+				Stage: "endorse",
+				Code:  "ERR_UNILATERAL",
+			},
+			expected: false,
+		},
+		{
+			name: "chaincode rejection ERR_INSUFFICIENT_FUNDS with endorse stage is NOT accepted",
+			outcome: ledger.Outcome{
+				OK:    false,
+				Stage: "endorse",
+				Code:  "ERR_INSUFFICIENT_FUNDS",
+			},
+			expected: false,
+		},
+		{
+			name: "ENDORSER_UNAVAILABLE at commit stage is NOT accepted",
+			outcome: ledger.Outcome{
+				OK:    false,
+				Stage: "commit",
+				Code:  "ENDORSER_UNAVAILABLE",
+			},
+			expected: false,
 		},
 		{
 			name: "successful result with endorse stage is NOT accepted",
