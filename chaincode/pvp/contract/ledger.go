@@ -109,9 +109,21 @@ func callerBank(ctx contractapi.TransactionContextInterface, cfg *Config) (strin
 	return "", msp, reject(ErrUnauthorized, "submitter MSP %q is not a settlement bank; only banks may move value", msp)
 }
 
+// unpagedScanCap is the most rows a plain (unpaginated) range scan returns on
+// Drunix's SQL state database: GetStateRangeScanIterator is a paginated scan
+// with a fixed page size of 10, and anything after the 10th row is dropped
+// silently. readAllBalances runs inside transactions that write, where Fabric
+// forbids paginated queries, so it cannot page past this; it fails closed
+// instead when a scan reaches the cap.
+const unpagedScanCap = 10
+
 // readAllBalances scans every BAL~ key on the ledger (committed state).
 // Scanning, rather than reading a known list, means a stray account
 // created by any means is still counted by the invariant.
+//
+// Drunix returns rows unordered and a row may repeat, so rows are counted by
+// distinct key. A scan that returns unpagedScanCap rows may have been
+// truncated, so the invariant refuses to run on it rather than sum a subset.
 func readAllBalances(stub shim.ChaincodeStubInterface) (Balances, int, error) {
 	it, err := stub.GetStateByPartialCompositeKey(keyBalance, []string{})
 	if err != nil {
@@ -120,11 +132,21 @@ func readAllBalances(stub shim.ChaincodeStubInterface) (Balances, int, error) {
 	defer it.Close()
 	out := Balances{}
 	n := 0
+	fetched := 0
+	seen := map[string]bool{}
 	for it.HasNext() {
 		kv, err := it.Next()
 		if err != nil {
 			return nil, 0, reject(ErrInternal, "scan balances: %v", err)
 		}
+		if fetched++; fetched >= unpagedScanCap {
+			return nil, 0, reject(ErrInternal,
+				"balance scan reached %d rows, the state database's limit for an unpaginated scan; cannot prove every account was counted", unpagedScanCap)
+		}
+		if seen[kv.Key] {
+			continue
+		}
+		seen[kv.Key] = true
 		_, attrs, err := stub.SplitCompositeKey(kv.Key)
 		if err != nil || len(attrs) != 2 {
 			return nil, 0, reject(ErrInvariantViolation, "malformed balance key %q", kv.Key)

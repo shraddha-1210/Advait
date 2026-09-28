@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>Advaita</h1>
+<h1>Advait</h1>
 
 Both-or-neither settlement for USD/INR trades between two banks, on NPCI's Drunix ledger.
 
@@ -14,7 +14,7 @@ When an Indian bank and a foreign bank settle an FX trade, each pays its own leg
 
 ## 2. What we built
 
-Advaita is a working prototype of a PvP settlement layer for USD/INR on a single Drunix network (Drunix is NPCI's fork of Hyperledger Fabric). Two banks, BankIN and BankFX, each instruct the same trade terms. A single chaincode transaction then moves the INR leg and the USD leg together. Fabric either commits that whole transaction or none of it, so a trade either fully settles or nothing moves. On top of that we built a defined set of defences: the chaincode refuses double-settlement, replay, underfunded trades, forged or mismatched instructions, unsigned or tampered FX rates, and bad amounts. It also checks a value-conservation invariant on every settlement. The network rejects any settlement that only one bank's peer endorsed. All cash on the ledger is simulated. Every behaviour described below is covered by unit tests, and most of it also by integration tests against a live Drunix network.
+Advait is a working prototype of a PvP settlement layer for USD/INR on a single Drunix network (Drunix is NPCI's fork of Hyperledger Fabric). Two banks, BankIN and BankFX, each instruct the same trade terms. A single chaincode transaction then moves the INR leg and the USD leg together. Fabric either commits that whole transaction or none of it, so a trade either fully settles or nothing moves. On top of that we built a defined set of defences: the chaincode refuses double-settlement, replay, underfunded trades, forged or mismatched instructions, unsigned or tampered FX rates, and bad amounts. It also checks a value-conservation invariant on every settlement. The network rejects any settlement that only one bank's peer endorsed. All cash on the ledger is simulated. Every behaviour described below is covered by unit tests, and most of it also by integration tests against a live Drunix network.
 
 ## 3. Architecture
 
@@ -87,6 +87,17 @@ flowchart LR
 
 Suppose BankFX must deliver more USD than it holds. The INR leg is fundable. `SettleTrade` finds the shortfall before writing anything and returns `ERR_INSUFFICIENT_FUNDS: ... Neither leg was paid`. Because the chaincode returned an error, no endorsement is produced and nothing is written. The trade stays `MATCHED` and every balance is unchanged. The unit tests check that the rejected call attempted no writes at all. The integration tests read the balances from both banks' peers and check they are identical before and after.
 
+**A batch that settles net (bilateral netting)**
+
+Instead of settling every trade one by one, both banks settle a single net amount per currency. `NetSettle` takes a batch of MATCHED trades between BankIN and BankFX. In one transaction the chaincode:
+- checks every trade exists, is MATCHED and unsettled, and is still priced at a usable attested rate (the same checks as `SettleTrade`),
+- adds up, per currency, what each bank owes the other across the batch, and nets it to one amount flowing one way (or zero),
+- checks the net payers can fund the NET amounts only,
+- checks the value-conservation invariant on the result,
+- and only then writes the balances, marks every trade in the batch `SETTLED` (via `NET:<batchId>`), stores the batch record and appends one `NET_SETTLED` audit entry.
+
+If any trade in the batch cannot settle, or the net is not funded, the whole batch is refused and nothing is written. A batch can settle even when one of its trades could not settle on its own, because only the net must be funded. `PreviewNet` runs the same checks and arithmetic read-only, so the gross-versus-net figures on screen are exactly what would settle. Netting is bilateral only.
+
 Rejected transactions never reach the ledger, by design. The gateway keeps an in-memory log of refused attempts (`GET /api/rejections`) so they can be shown. That log is not ledger data.
 
 ## 5. Security
@@ -153,7 +164,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 
 ### How we checked that the tests catch real bugs
 
-`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 21 injected bugs are caught. The script first runs the tests on the unmodified copy and aborts if they fail, so a build or download error cannot be counted as a caught bug.
+`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 27 injected bugs are caught, including four in netting (summing instead of netting, accepting a settled trade, leaving batch trades unsettled, replaying a batch ID). The script first runs the tests on the unmodified copy and aborts if they fail, so a build or download error cannot be counted as a caught bug.
 
 ## 6. Impact
 
@@ -178,7 +189,9 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - The Drunix test network (commit `ddc0eae`) running locally in Docker on Windows 11 with WSL2: 1 orderer, 2 orgs, each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB.
 - The `pvp` chaincode, deployed with policy `AND('Org1MSP.peer','Org2MSP.peer')`.
 - The gateway HTTP API, including all attack scenarios.
-- 39 chaincode unit tests (plus 9 subtests), 1 gateway unit test (`gateway/internal/api/attacks_test.go`, 13 subtests covering which refusals count as "peer offline"), the 21-bug mutation check, and 7 integration tests against the live network (the threat-matrix test has 13 subtests). The peer-down test stops and restarts a real peer container.
+- Bilateral netting (`NetSettle`, `PreviewNet`, `GetBatch`), run live through the gateway and the frontend.
+- A web frontend (`frontend/`, React + TypeScript + Vite + Tailwind) with four screens: Settlement, Netting, Security and Audit. Every figure on it comes from a gateway call. We ran the settle, rollback and attack flows through it against the live network.
+- 50 chaincode unit tests (plus 9 subtests), including 8 for netting; 4 gateway unit tests (`gateway/internal/api/`), the 27-bug mutation check, and 7 integration tests against the live network (the threat-matrix test has 13 subtests). The peer-down test stops and restarts a real peer container.
 
 **Simulated**
 - All balances. The opening balances are 500,000,000.00 INR for BankIN and 5,000,000.00 USD for BankFX. No real money or liquidity is involved.
@@ -186,10 +199,8 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - One gateway process holds a client identity for both banks, so a single machine can drive the demo. In practice each bank would sign with its own keys in its own systems.
 
 **Not done**
-- Bilateral netting (`netSettle`). The roadmap gates this, and it is not built.
 - The compliance record (purpose code, simulated AML result) and the private data collection. Not built.
 - The Auditor and the Oracle as their own MSPs on the channel. Not built.
-- The frontend (bank dashboards, settlement screen, auditor view). Not built. Today the system is driven through the HTTP API, the `pvpctl` CLI and the tests.
 
 ## 8. USPs and novelty
 
@@ -199,7 +210,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - **Hostile-participant model.** We test against a bank with valid credentials that attacks, not only against malformed input.
 - **Why a ledger and not a shared database:** two banks that don't trust each other need all-or-nothing settlement of two currency legs. A shared database or registry can record it but cannot atomically enforce it. Only a ledger with atomic commit and endorsement by both organisations can.
 
-**Compared with Citi Token Services (CTS).** From public information, CTS runs on Citi's own network for Citi's clients and is focused on USD and a small set of major currencies. We have not seen INR PvP in it. We do not claim CTS cannot do PvP. The difference we are pointing at is this: Advaita is INR-focused, runs on NPCI's neutral shared infrastructure rather than inside one bank, and puts deterministic attack rejection and regulator visibility at the centre.
+**Compared with Citi Token Services (CTS).** From public information, CTS runs on Citi's own network for Citi's clients and is focused on USD and a small set of major currencies. We have not seen INR PvP in it. We do not claim CTS cannot do PvP. The difference we are pointing at is this: Advait is INR-focused, runs on NPCI's neutral shared infrastructure rather than inside one bank, and puts deterministic attack rejection and regulator visibility at the centre.
 
 ## 9. Tech stack
 
@@ -210,6 +221,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 | Rate signatures | Ed25519 (Go standard library) | Deterministic verification. The chaincode and the signer share one payload definition (`chaincode/pvp/attest`). |
 | Gateway | Go, `fabric-gateway` v1.10.0, `net/http` | Same version as the Drunix Go gateway sample, which we ran successfully against this network. |
 | Runtime | Docker Desktop with WSL2 (Ubuntu), Go 1.26.1 inside WSL (the minimum Drunix `ddc0eae` builds with; the gateway module needs >= 1.25.0) | Drunix's scripts need Linux. |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS 4 | Four screens driven only by gateway calls; no mock data. |
 | Money | Integer minor units (paise, cents), with big-integer math for FX conversion | No floats. Overflow cannot silently wrap. |
 
 ## 10. How to run
@@ -264,7 +276,7 @@ cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen net
 **5. Deploy the chaincode, initialise the ledger, publish a rate**
 ```bash
 cd "$ADVAITA"
-bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer')
+bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer'); to upgrade later: deploy-cc.sh <version> <next sequence>
 /root/bin/pvpctl init network/oracle/oracle.pub              # once only; a second run returns ERR_ALREADY_INITIALIZED
 /root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000
 /root/bin/pvpctl query GetBalances
@@ -279,7 +291,7 @@ From Windows or WSL:
 curl http://localhost:8080/api/state
 curl -X POST http://localhost:8080/api/attacks/forged-instruction
 ```
-Other endpoints: `GET /api/health`, `/api/audit`, `/api/quote?usd=&seq=`, `/api/attacks`, `/api/rejections`, and `POST /api/oracle/rates`, `/api/instructions`, `/api/trades/{id}/settle`, `/api/attacks/{name}`.
+Other endpoints: `GET /api/health`, `/api/audit`, `/api/quote?usd=&seq=`, `/api/trades/{id}`, `/api/attacks`, `/api/rejections`, and `POST /api/net-preview`, `/api/net-settle`, `/api/oracle/rates`, `/api/instructions`, `/api/trades/{id}/settle`, `/api/attacks/{name}`.
 
 **7. Run the tests**
 ```bash
@@ -302,27 +314,32 @@ cd "$ADVAITA"/gateway && go test -tags integration ./integration/ -count=1 -v
 RUN_DISRUPTIVE=1 go test -tags integration ./integration/ -count=1 -v
 ```
 
+**8. Run the frontend** (gateway from step 6 must be running)
+```bash
+cd "$ADVAITA"/frontend && npm install && npm run dev   # http://localhost:5180
+```
+Needs Node.js 20 or later. We ran it from Windows (Node 24): `cd C:\Advait\frontend`, then `npm install` and `npm run dev`. Set `VITE_GATEWAY_URL` if the gateway is not on `http://localhost:8080`. The gateway's CORS rule accepts any `http://localhost:<port>` origin.
+
 To start over from an empty ledger, run `./network.sh down` in `/root/drunix/drunix-network/test-network` and repeat steps 3 and 5. We have not scripted this reset yet.
 
 ## 11. Limitations and future work
 
 **Limitations**
 - **Single network only.** Both banks are orgs on one Drunix network. There is no atomicity across two separate networks.
-- **Netting is not built.** `netSettle` does not exist yet. Every trade settles gross.
+- **Bilateral netting only.** A batch nets between BankIN and BankFX, at most 50 trades. Multilateral netting (three or more banks) is not built.
 - **Simulated cash and a simulated oracle.** No real INR or USD moves, and no liquidity is created. The rate is typed in by the operator.
 - **No real CBDC or central bank money.** At most the design could be called CBDC-ready. Nothing is integrated.
 - **Only two MSPs.** The Oracle and the Auditor are not their own MSPs on the channel. The Oracle is a pinned key, and the audit endpoint reads the ledger with BankIN's identity.
 - **Compliance records and private data are not built.**
 - **Peer-down error label.** When BankFX's peer is stopped, the refusal sometimes comes back as `ENDORSER_UNAVAILABLE` and sometimes as `ENDORSE_FAILED`, depending on how the Fabric gateway words the transport error. The gateway's `expectedCode` flag and the integration test accept exactly those two codes at the endorsement stage. A chaincode `ERR_...` code or `PROPOSAL_ERROR` does not count, even though it is also reported at that stage. `ENDORSE_FAILED` is the gateway's catch-all for endorsement errors that carry no chaincode code, so on its own it cannot tell a stopped peer from another transport failure. The live test can, because it stops the peer itself.
+- **Range scans on Drunix.** Drunix's SQL state database implements a plain range scan as a paginated scan with a fixed page size of 10 (`statesqldb.go`, `GetStateRangeScanIterator`), returns rows unordered, and its bookmarks do not resume a scan. Before chaincode 1.1, `GetTrades` and `GetAuditLog` silently returned 10 unordered rows (we saw 10 of 113 audit entries). Chaincode 1.1 reads the audit log by sequence number (exact and ordered), and lists trades and rates with one paginated query of up to 10,000 rows, de-duplicated and sorted, that fails closed if the page is full. Paginated queries are not allowed in transactions that write, so the balance scan used by the value-conservation invariant stays unpaginated: it refuses to run (`ERR_INTERNAL`) once a scan reaches 10 rows, because it cannot prove the scan is complete. With 4 balance accounts this does not trigger, but adding accounts needs a different design (for example an account registry read by point lookups). The unit tests' fake ledger reproduces the cap and the unordered results.
 - **Trusted bootstrap.** `InitLedger` configuration (bank MSPs, oracle key, opening balances) is trusted once at deployment. It cannot be changed afterwards.
 - **Griefing.** A hostile bank that instructs a trade ID first with bad terms can block the honest bank's instruction for that trade. The system stays safe (nothing moves), but there is no cancel function.
 - **One gateway, both banks' keys.** This is a demo simplification.
 - **Drunix-specific behaviour.** Several findings are logged in `NOTES.md`. For example, block validation flags read VALID even for a transaction that was invalidated (D8), so we check rejections through state and commit status instead.
 
 **Future work**
-- Bilateral netting of a batch of matched trades, settled as one atomic net movement.
 - Oracle and Auditor as their own MSPs, and compliance records in a private data collection readable by the banks and the Auditor.
-- The frontend: two bank dashboards, a settlement view, an auditor view.
 - A settlement asset backed by real central bank money or a wholesale CBDC leg.
 - Multilateral netting (three or more banks).
 - Atomic settlement across separate networks.
@@ -334,6 +351,6 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 
 **OUR IMPLEMENTATION.** Atomic two-leg USD/INR settlement on a single Drunix network. Endorsement by both banks is required. Consent is based on matching instructions. The chaincode refuses a defined threat set, including attacks from a hostile participant. A value-conservation invariant is checked on every settlement. FX rates are oracle-signed. There is an append-only audit log. All cash is simulated.
 
-**LIMITATIONS.** Creates no liquidity. Single network. Two MSPs only. No netting, compliance records or frontend yet. Simulated oracle and cash. No real banks or governance.
+**LIMITATIONS.** Creates no liquidity. Single network. Two MSPs only. Bilateral netting only. No compliance records yet. Simulated oracle and cash. No real banks or governance.
 
-**FUTURE WORK.** Bilateral then multilateral netting, separate Auditor and Oracle orgs with private compliance data, a real wholesale CBDC or central bank money leg, and settlement across separate networks.
+**FUTURE WORK.** Multilateral netting, separate Auditor and Oracle orgs with private compliance data, a real wholesale CBDC or central bank money leg, and settlement across separate networks.
