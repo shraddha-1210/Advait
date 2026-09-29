@@ -21,7 +21,7 @@ Advait is a working prototype of a PvP settlement layer for USD/INR on a single 
 ```mermaid
 flowchart LR
     subgraph Client side
-        API["Gateway (Go, HTTP :8080)<br/>holds a client identity per bank"]
+        API["Gateway (Go, HTTP :8080)<br/>holds a client identity per org"]
         OR["Simulated Oracle<br/>Ed25519 signing key"]
     end
 
@@ -36,11 +36,15 @@ flowchart LR
             CP2["Committing peer"]
             VS2["Validation server"]
         end
+        ORACLE["OracleMSP<br/>member org, no peer<br/>only org allowed to publish rates"]
+        AUDITOR["AuditorMSP<br/>member org, no peer<br/>read-only"]
         ORD["Raft orderer"]
         CC["pvp chaincode (Go)<br/>policy AND(Org1MSP.peer, Org2MSP.peer)"]
     end
 
     OR -- signed rate --> API
+    API -. "signs as" .-> ORACLE
+    API -. "signs as" .-> AUDITOR
     API -- proposal --> LP1
     API -- proposal --> LP2
     LP1 --- CC
@@ -60,16 +64,18 @@ flowchart LR
 | Lite peers (`:7051`, `:9051`) | Drunix splits a peer's roles. The lite peer runs chaincode and endorses. The committing peer and validation server handle commit. | Each bank runs its own copy of the chaincode, so no single bank decides the result. |
 | Endorsement policy `AND('Org1MSP.peer','Org2MSP.peer')` | Set when the chaincode was deployed | A transaction is valid only if a peer from each bank executed it and signed the same result. |
 | `pvp` chaincode (Go) | All settlement rules: instructions, rate checks, settlement, the invariant, queries | The rules run inside the ledger, not in an app that one party controls. |
-| Oracle | An Ed25519 key. Its public half is pinned in the ledger config at initialisation. | The chaincode accepts an FX rate only if this key signed it. The oracle is simulated. There is no live market feed. |
+| OracleMSP | Its own org on the channel (own CA, admin and client identity) with no peer, plus an Ed25519 signing key. The MSP ID and the key's public half are both pinned in the ledger config at initialisation. | The chaincode accepts an FX rate only if the OracleMSP identity submits it AND the pinned key signed it. A bank cannot publish a rate, and the oracle org cannot publish one the key did not sign. The oracle is simulated. There is no live market feed. |
+| AuditorMSP | Its own org on the channel (own CA, admin and client identity) with no peer. Pinned as an auditor at initialisation. | The regulator's identity. The audit endpoint queries the ledger as AuditorMSP. The chaincode refuses every write from it. |
+| Channel policies | `add-orgs.sh` pins the channel's `Admins`, `LifecycleEndorsement` and `Endorsement` to `AND(Org1MSP, Org2MSP)` | With 4 orgs the default "MAJORITY" would mean 3 of 4. The peerless orgs could never approve a chaincode, and they could make up a governance majority. The explicit rule keeps what MAJORITY meant with 2 orgs: both banks. |
 | Gateway | Go HTTP service using the Fabric Gateway SDK | Submits transactions and queries. It returns real before and after balance reads with every write, and it runs the attack scenarios. |
 
-**Not built yet:** the Oracle and the Auditor are not separate orgs (MSPs) on the channel. The stock Drunix test network has two peer orgs, and we have not yet added more. The Oracle is a pinned key, and the audit endpoint reads the ledger with BankIN's identity.
+**Oracle and Auditor orgs.** The stock Drunix test network has two peer orgs. `network/add-orgs.sh` adds `OracleMSP` and `AuditorMSP` to the running channel with a channel config update signed by both bank admins. Neither org runs a peer. Their clients send proposals through BankIN's lite peer, which authenticates their MSP from the channel config. So the Auditor reads the ledger as seen by BankIN's peer. The integration tests check that this matches BankFX's peer.
 
 ## 4. How it works, step by step
 
 **A trade that settles**
 
-1. **Oracle publishes a rate.** The oracle signs a USD/INR rate with a sequence number, for example seq 1 = 83.250000. Any bank can relay it with `PublishRate`. The chaincode checks the signature against the pinned key and requires the sequence number to be higher than any rate already published. It then stores the rate.
+1. **Oracle publishes a rate.** The oracle signs a USD/INR rate with a sequence number, for example seq 1 = 83.250000. The OracleMSP identity submits it with `PublishRate`. The chaincode refuses any other submitter, checks the signature against the pinned key and requires the sequence number to be higher than any rate already published. It then stores the rate.
 2. **The INR amount is quoted by the chaincode.** `QuoteINR` returns the INR leg for a USD amount at a published rate. It uses integer math (paise = cents x rate, rounded half-up), so no client computes the price itself.
 3. **BankIN instructs.** It calls `SubmitInstruction` with the trade ID, which bank pays USD, both amounts and the rate sequence number. The chaincode reads the submitter's MSP from the signed proposal. The instruction must say it comes from that same bank. The trade is now `PENDING_MATCH`.
 4. **BankFX instructs the same terms.** If every term matches, the trade becomes `MATCHED`. If any term differs, the instruction is rejected.
@@ -120,9 +126,11 @@ We treat security as the main feature, not an add-on. Each check below runs in t
 | Counterparty "matches" with different terms | Every term compared; any difference refused | `ERR_INSTRUCTION_MISMATCH` | Unit, Live |
 | A bank instructs twice to match itself | Second instruction from the same bank refused | `ERR_DUPLICATE_INSTRUCTION` | Unit |
 | A non-bank identity tries to move value | Only the two bank MSPs may instruct or settle | `ERR_UNAUTHORIZED` | Unit |
+| The Auditor tries to settle, instruct or publish a rate | AuditorMSP is refused on every write | `ERR_UNAUTHORIZED` | Unit, Live |
+| A bank publishes a rate itself (even one genuinely signed) | Only the pinned OracleMSP may submit `PublishRate` | `ERR_UNAUTHORIZED` | Unit, Live |
 | Unsigned FX rate | Signature required | `ERR_ATTESTATION_UNSIGNED` | Unit, Live |
 | Genuine signed rate with the number edited | Signature no longer verifies | `ERR_ATTESTATION_BAD_SIGNATURE` | Unit, Live |
-| Rate signed by a colluding oracle key | Only the key pinned at init is accepted | `ERR_ATTESTATION_BAD_SIGNATURE` | Unit, Live |
+| Rate signed by a colluding oracle key, even submitted by the oracle org | Only the key pinned at init is accepted | `ERR_ATTESTATION_BAD_SIGNATURE` | Unit, Live |
 | Re-publish an old genuine rate | Sequence number must exceed the latest | `ERR_ATTESTATION_STALE` | Unit, Live |
 | Use a rate that has gone stale (at instruction or at settlement) | Only the latest 3 published rates are accepted | `ERR_ATTESTATION_STALE` | Unit |
 | Reference a rate that was never published | Rate must exist on the ledger | `ERR_ATTESTATION_UNKNOWN` | Unit |
@@ -164,7 +172,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 
 ### How we checked that the tests catch real bugs
 
-`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 27 injected bugs are caught, including four in netting (summing instead of netting, accepting a settled trade, leaving batch trades unsettled, replaying a batch ID). The script first runs the tests on the unmodified copy and aborts if they fail, so a build or download error cannot be counted as a caught bug.
+`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. Examples of injected bugs: the receiver is never credited, the funds check is removed, signature verification is bypassed, the stale-rate window is off by one, rounding is changed to truncation. All 29 injected bugs are caught, including four in netting (summing instead of netting, accepting a settled trade, leaving batch trades unsettled, replaying a batch ID) and two in the role checks (the Auditor allowed to publish, the oracle-org gate removed). The script first runs the tests on the unmodified copy and aborts if they fail, so a build or download error cannot be counted as a caught bug.
 
 ## 6. Impact
 
@@ -186,21 +194,20 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 ## 7. Feasibility
 
 **Runs today (tested)**
-- The Drunix test network (commit `ddc0eae`) running locally in Docker on Windows 11 with WSL2: 1 orderer, 2 orgs, each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB.
+- The Drunix test network (commit `ddc0eae`) running locally in Docker on Windows 11 with WSL2: 1 orderer and 2 bank orgs, each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB. Two more member orgs, OracleMSP and AuditorMSP, are on the channel with no peers.
 - The `pvp` chaincode, deployed with policy `AND('Org1MSP.peer','Org2MSP.peer')`.
 - The gateway HTTP API, including all attack scenarios.
 - Bilateral netting (`NetSettle`, `PreviewNet`, `GetBatch`), run live through the gateway and the frontend.
 - A web frontend (`frontend/`, React + TypeScript + Vite + Tailwind) with four screens: Settlement, Netting, Security and Audit. Every figure on it comes from a gateway call. We ran the settle, rollback and attack flows through it against the live network.
-- 50 chaincode unit tests (plus 9 subtests), including 8 for netting; 4 gateway unit tests (`gateway/internal/api/`), the 27-bug mutation check, and 7 integration tests against the live network (the threat-matrix test has 13 subtests). The peer-down test stops and restarts a real peer container.
+- 55 chaincode unit tests (plus 18 subtests), including 8 for netting and 5 for the Oracle and Auditor roles; 4 gateway unit tests (`gateway/internal/api/`), the 29-bug mutation check, and 13 integration tests against the live 4-org network (the threat-matrix test has 15 subtests; 4 tests use the real OracleMSP and AuditorMSP identities). The peer-down test stops and restarts a real peer container.
 
 **Simulated**
 - All balances. The opening balances are 500,000,000.00 INR for BankIN and 5,000,000.00 USD for BankFX. No real money or liquidity is involved.
-- The oracle. It uses a real Ed25519 key, but the rate is whatever the operator publishes.
-- One gateway process holds a client identity for both banks, so a single machine can drive the demo. In practice each bank would sign with its own keys in its own systems.
+- The oracle. It is a real org on the channel with a real Ed25519 key, but the rate is whatever the operator publishes.
+- One gateway process holds a client identity for both banks, the Oracle and the Auditor, so a single machine can drive the demo. In practice each org would sign with its own keys in its own systems.
 
 **Not done**
 - The compliance record (purpose code, simulated AML result) and the private data collection. Not built.
-- The Auditor and the Oracle as their own MSPs on the channel. Not built.
 
 ## 8. USPs and novelty
 
@@ -264,10 +271,12 @@ export FABRIC_CFG_PATH=/root/drunix/drunix-network/config
 cd /root/drunix/drunix-network/test-network
 ./network.sh up
 ./network.sh createChannel
+bash "$ADVAITA"/network/add-orgs.sh   # adds OracleMSP + AuditorMSP to mychannel; prints the 4 member orgs
 ```
 
 **4. Build the gateway tools and create the oracle key**
 ```bash
+export GOFLAGS=-buildvcs=false   # WSL git refuses the Windows-owned checkout (NOTES.md E8)
 cd "$ADVAITA"/gateway && go build -o /root/bin/ ./cmd/...
 cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
 ```
@@ -278,7 +287,7 @@ cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen net
 cd "$ADVAITA"
 bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer'); to upgrade later: deploy-cc.sh <version> <next sequence>
 /root/bin/pvpctl init network/oracle/oracle.pub              # once only; a second run returns ERR_ALREADY_INITIALIZED
-/root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000
+/root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000, submitted as OracleMSP
 /root/bin/pvpctl query GetBalances
 ```
 
@@ -329,7 +338,7 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 - **Bilateral netting only.** A batch nets between BankIN and BankFX, at most 50 trades. Multilateral netting (three or more banks) is not built.
 - **Simulated cash and a simulated oracle.** No real INR or USD moves, and no liquidity is created. The rate is typed in by the operator.
 - **No real CBDC or central bank money.** At most the design could be called CBDC-ready. Nothing is integrated.
-- **Only two MSPs.** The Oracle and the Auditor are not their own MSPs on the channel. The Oracle is a pinned key, and the audit endpoint reads the ledger with BankIN's identity.
+- **The Oracle and Auditor orgs have no peers.** They are real channel members with their own identities, but they endorse nothing and hold no copy of the ledger. The Auditor reads through BankIN's lite peer, so it relies on that peer for what it sees. The Auditor's queries could be run against both banks' peers and compared, but the audit endpoint does not do this yet.
 - **Compliance records and private data are not built.**
 - **Peer-down error label.** When BankFX's peer is stopped, the refusal sometimes comes back as `ENDORSER_UNAVAILABLE` and sometimes as `ENDORSE_FAILED`, depending on how the Fabric gateway words the transport error. The gateway's `expectedCode` flag and the integration test accept exactly those two codes at the endorsement stage. A chaincode `ERR_...` code or `PROPOSAL_ERROR` does not count, even though it is also reported at that stage. `ENDORSE_FAILED` is the gateway's catch-all for endorsement errors that carry no chaincode code, so on its own it cannot tell a stopped peer from another transport failure. The live test can, because it stops the peer itself.
 - **Range scans on Drunix.** Drunix's SQL state database implements a plain range scan as a paginated scan with a fixed page size of 10 (`statesqldb.go`, `GetStateRangeScanIterator`), returns rows unordered, and its bookmarks do not resume a scan. Before chaincode 1.1, `GetTrades` and `GetAuditLog` silently returned 10 unordered rows (we saw 10 of 113 audit entries). Chaincode 1.1 reads the audit log by sequence number (exact and ordered), and lists trades and rates with one paginated query of up to 10,000 rows, de-duplicated and sorted, that fails closed if the page is full. Paginated queries are not allowed in transactions that write, so the balance scan used by the value-conservation invariant stays unpaginated: it refuses to run (`ERR_INTERNAL`) once a scan reaches 10 rows, because it cannot prove the scan is complete. With 4 balance accounts this does not trigger, but adding accounts needs a different design (for example an account registry read by point lookups). The unit tests' fake ledger reproduces the cap and the unordered results.
@@ -339,7 +348,7 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 - **Drunix-specific behaviour.** Several findings are logged in `NOTES.md`. For example, block validation flags read VALID even for a transaction that was invalidated (D8), so we check rejections through state and commit status instead.
 
 **Future work**
-- Oracle and Auditor as their own MSPs, and compliance records in a private data collection readable by the banks and the Auditor.
+- Compliance records in a private data collection readable by the banks and the Auditor. An Auditor peer would be needed to hold that collection.
 - A settlement asset backed by real central bank money or a wholesale CBDC leg.
 - Multilateral netting (three or more banks).
 - Atomic settlement across separate networks.
@@ -351,6 +360,6 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 
 **OUR IMPLEMENTATION.** Atomic two-leg USD/INR settlement on a single Drunix network. Endorsement by both banks is required. Consent is based on matching instructions. The chaincode refuses a defined threat set, including attacks from a hostile participant. A value-conservation invariant is checked on every settlement. FX rates are oracle-signed. There is an append-only audit log. All cash is simulated.
 
-**LIMITATIONS.** Creates no liquidity. Single network. Two MSPs only. Bilateral netting only. No compliance records yet. Simulated oracle and cash. No real banks or governance.
+**LIMITATIONS.** Creates no liquidity. Single network. Oracle and Auditor orgs have no peers. Bilateral netting only. No compliance records yet. Simulated oracle and cash. No real banks or governance.
 
-**FUTURE WORK.** Multilateral netting, separate Auditor and Oracle orgs with private compliance data, a real wholesale CBDC or central bank money leg, and settlement across separate networks.
+**FUTURE WORK.** Multilateral netting, an Auditor peer with private compliance data, a real wholesale CBDC or central bank money leg, and settlement across separate networks.

@@ -90,8 +90,16 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 		return reject(ErrInvalidInput, "%s and %s must be different MSPs", BankIN, BankFX)
 	}
 	for _, a := range cfg.AuditorMSPs {
+		if a == "" {
+			return reject(ErrInvalidInput, "auditor MSP IDs must be non-empty")
+		}
 		if a == cfg.Banks[BankIN] || a == cfg.Banks[BankFX] {
 			return reject(ErrInvalidInput, "auditor MSP %q must not be a bank MSP", a)
+		}
+	}
+	if o := cfg.OracleMSP; o != "" {
+		if o == cfg.Banks[BankIN] || o == cfg.Banks[BankFX] || contains(cfg.AuditorMSPs, o) {
+			return reject(ErrInvalidInput, "oracle MSP %q must not be a bank or auditor MSP", o)
 		}
 	}
 	msp, err := callerMSP(ctx)
@@ -168,8 +176,8 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 		}
 	}
 	return appendLog(stub, "INIT", msp, "config",
-		fmt.Sprintf("banks %s=%s %s=%s; oracle %q; supply INR=%d USD=%d",
-			BankIN, cfg.Banks[BankIN], BankFX, cfg.Banks[BankFX], cfg.OracleName, supply[INR], supply[USD]))
+		fmt.Sprintf("banks %s=%s %s=%s; oracle %q (MSP %q); auditors %v; supply INR=%d USD=%d",
+			BankIN, cfg.Banks[BankIN], BankFX, cfg.Banks[BankFX], cfg.OracleName, cfg.OracleMSP, cfg.AuditorMSPs, supply[INR], supply[USD]))
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +245,10 @@ func checkRateUsable(stub shim.ChaincodeStubInterface, cfg *Config, seq, usd, in
 	return r, nil
 }
 
-// PublishRate records an Oracle-signed FX rate. Anyone on the channel may
-// relay it; the chaincode accepts it only if the signature verifies against
-// the oracle key pinned at InitLedger and its sequence is newer than every
-// rate already published.
+// PublishRate records an Oracle-signed FX rate. If an oracle MSP is pinned,
+// only that org may submit it; auditors never may. The chaincode accepts the
+// rate only if the signature verifies against the oracle key pinned at
+// InitLedger and its sequence is newer than every rate already published.
 func (c *PvPContract) PublishRate(ctx contractapi.TransactionContextInterface, attestationJSON string) error {
 	stub := ctx.GetStub()
 	cfg, err := loadConfig(stub)
@@ -250,6 +258,12 @@ func (c *PvPContract) PublishRate(ctx contractapi.TransactionContextInterface, a
 	msp, err := callerMSP(ctx)
 	if err != nil {
 		return err
+	}
+	if contains(cfg.AuditorMSPs, msp) {
+		return reject(ErrUnauthorized, "submitter MSP %q is an auditor; auditors have read-only access", msp)
+	}
+	if cfg.OracleMSP != "" && msp != cfg.OracleMSP {
+		return reject(ErrUnauthorized, "only the oracle org %q may publish rates (submitter %q)", cfg.OracleMSP, msp)
 	}
 	var a Attestation
 	if err := decodeStrict("attestation", attestationJSON, &a); err != nil {

@@ -52,12 +52,17 @@ const (
 
 // Config is pinned once at InitLedger and never changes.
 type Config struct {
-	Banks           map[string]string `json:"banks"` // role -> MSP ID
-	AuditorMSPs     []string          `json:"auditorMsps"`
-	Pair            string            `json:"pair"`            // "USD/INR"
-	OraclePublicKey string            `json:"oraclePublicKey"` // base64 Ed25519
-	OracleName      string            `json:"oracleName"`
-	RateWindow      int               `json:"rateWindow"` // accept the latest N published rates
+	Banks       map[string]string `json:"banks"`       // role -> MSP ID
+	AuditorMSPs []string          `json:"auditorMsps"` // read-only orgs: refused on every write
+	// OracleMSP, if set, is the only MSP allowed to submit PublishRate. The
+	// attestation must still verify against OraclePublicKey, so publishing
+	// needs both the oracle org's identity and the oracle's signing key.
+	// Empty means any non-auditor channel member may relay a signed rate.
+	OracleMSP       string `json:"oracleMsp,omitempty"`
+	Pair            string `json:"pair"`            // "USD/INR"
+	OraclePublicKey string `json:"oraclePublicKey"` // base64 Ed25519
+	OracleName      string `json:"oracleName"`
+	RateWindow      int    `json:"rateWindow"` // accept the latest N published rates
 }
 
 // InitRequest is the InitLedger argument.

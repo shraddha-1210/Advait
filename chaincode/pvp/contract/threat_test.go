@@ -76,28 +76,28 @@ func TestThreat_UnsignedRate(t *testing.T) {
 	f := newFixture(t)
 	a := signed(realOracle, 1, 83_250_000)
 	a.Signature = ""
-	f.mustReject(ErrAttestationUnsigned, func() txResult { return f.publish(mspIN, a) })
+	f.mustReject(ErrAttestationUnsigned, func() txResult { return f.publish(mspOracle, a) })
 }
 
 func TestThreat_PoisonedRate_TamperedAfterSigning(t *testing.T) {
 	f := newFixture(t)
 	a := signed(realOracle, 1, 83_250_000)
 	a.RateMicros = 90_000_000 // attacker edits the rate, keeps the signature
-	err := f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspFX, a) })
+	err := f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspOracle, a) })
 	if !strings.Contains(err.Error(), "not signed by the pinned oracle key") {
 		t.Fatalf("unexpected message: %v", err)
 	}
 	// Tampering with the source name is caught too.
 	b := signed(realOracle, 1, 83_250_000)
 	b.Source = "Totally Real Oracle"
-	f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspFX, b) })
+	f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspOracle, b) })
 }
 
 func TestThreat_MalformedSignature(t *testing.T) {
 	f := newFixture(t)
 	a := signed(realOracle, 1, 83_250_000)
 	a.Signature = base64.StdEncoding.EncodeToString([]byte("short"))
-	f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspIN, a) })
+	f.mustReject(ErrAttestationBadSignature, func() txResult { return f.publish(mspOracle, a) })
 }
 
 // Malicious bank colludes with a fake oracle: the attestation carries a
@@ -105,22 +105,22 @@ func TestThreat_MalformedSignature(t *testing.T) {
 func TestThreat_CollusionWithFakeOracle(t *testing.T) {
 	f := newFixture(t)
 	f.mustReject(ErrAttestationBadSignature, func() txResult {
-		return f.publish(mspFX, signed(fakeOracle, 1, 95_000_000))
+		return f.publish(mspOracle, signed(fakeOracle, 1, 95_000_000))
 	})
 }
 
 func TestThreat_StaleRate_OldOrReplayedPublish(t *testing.T) {
 	f := newFixtureWithRate(t) // seq 1
-	f.mustOK(f.publish(mspIN, signed(realOracle, 2, 83_300_000)))
-	f.mustReject(ErrAttestationStale, func() txResult { return f.publish(mspIN, signed(realOracle, 2, 83_300_000)) }) // replay
-	f.mustReject(ErrAttestationStale, func() txResult { return f.publish(mspIN, signed(realOracle, 1, 83_250_000)) }) // older
+	f.mustOK(f.publish(mspOracle, signed(realOracle, 2, 83_300_000)))
+	f.mustReject(ErrAttestationStale, func() txResult { return f.publish(mspOracle, signed(realOracle, 2, 83_300_000)) }) // replay
+	f.mustReject(ErrAttestationStale, func() txResult { return f.publish(mspOracle, signed(realOracle, 1, 83_250_000)) }) // older
 }
 
 func TestThreat_StaleRate_AtInstruction(t *testing.T) {
 	f := newFixtureWithRate(t)                       // seq 1; window = 3
 	in := f.trade("T1", BankIN, BankFX, 1_000_00, 1) // priced at seq 1
 	for seq := int64(2); seq <= 4; seq++ {
-		f.mustOK(f.publish(mspIN, signed(realOracle, seq, 83_250_000+seq)))
+		f.mustOK(f.publish(mspOracle, signed(realOracle, seq, 83_250_000+seq)))
 	}
 	// Head is 4; window 3 accepts seq 2,3,4. Seq 1 is stale.
 	err := f.mustReject(ErrAttestationStale, func() txResult { return f.instruct(mspIN, in) })
@@ -135,7 +135,7 @@ func TestThreat_StaleRate_AtSettlement(t *testing.T) {
 	f := newFixtureWithRate(t)
 	f.matched("T1", BankFX, 1_000_00, 1)
 	for seq := int64(2); seq <= 4; seq++ {
-		f.mustOK(f.publish(mspIN, signed(realOracle, seq, 83_250_000)))
+		f.mustOK(f.publish(mspOracle, signed(realOracle, seq, 83_250_000)))
 	}
 	f.mustReject(ErrAttestationStale, func() txResult { return f.settle(mspIN, "T1") })
 	if st := f.tradeRecord("T1").Status; st != StatusMatched {
@@ -170,7 +170,7 @@ func TestThreat_AttestationFieldInjection(t *testing.T) {
 	f := newFixture(t)
 	a := signed(realOracle, 1, 83_250_000)
 	a.Source = "Oracle|83250000" // delimiter smuggling
-	f.mustReject(ErrInvalidInput, func() txResult { return f.publish(mspIN, a) })
+	f.mustReject(ErrInvalidInput, func() txResult { return f.publish(mspOracle, a) })
 }
 
 // --- Negative / overflow / malformed amounts --------------------------------
@@ -218,7 +218,7 @@ func TestThreat_BadAmounts(t *testing.T) {
 // A USD leg inside the cap whose INR leg would exceed it.
 func TestThreat_ConversionOverflow(t *testing.T) {
 	f := newFixture(t)
-	f.mustOK(f.publish(mspIN, signed(realOracle, 1, MaxRateMicros)))
+	f.mustOK(f.publish(mspOracle, signed(realOracle, 1, MaxRateMicros)))
 	in := Instruction{TradeID: "BIG", AsBank: BankIN, USDDeliverer: BankFX,
 		USDAmount: "1000000000000000", INRAmount: "1000000000000000", RateSeq: 1}
 	f.mustReject(ErrAmountOverflow, func() txResult { return f.instruct(mspIN, in) })
@@ -321,13 +321,18 @@ func TestThreat_MaliciousOrg_FullScenario(t *testing.T) {
 		{"replay its old instruction", ErrReplay, func() txResult {
 			return f.instruct(mspFX, f.trade("HONEST", BankFX, BankFX, 5_000_00, 1))
 		}},
+		{"publish a rate itself (not the oracle org)", ErrUnauthorized, func() txResult {
+			return f.publish(mspFX, signed(realOracle, 2, 50_000_000))
+		}},
 		{"publish a rate from a colluding oracle", ErrAttestationBadSignature, func() txResult {
-			return f.publish(mspFX, signed(fakeOracle, 2, 50_000_000))
+			// Even relayed through the oracle org's identity, a key that was
+			// never pinned is refused.
+			return f.publish(mspOracle, signed(fakeOracle, 2, 50_000_000))
 		}},
 		{"publish a tampered real rate", ErrAttestationBadSignature, func() txResult {
 			a := signed(realOracle, 2, 83_250_000)
 			a.RateMicros = 50_000_000
-			return f.publish(mspFX, a)
+			return f.publish(mspOracle, a)
 		}},
 		{"price a trade off-rate", ErrRateMismatch, func() txResult {
 			in := f.trade("X3", BankFX, BankFX, 1_000_00, 1)
@@ -446,9 +451,9 @@ func TestInvariant_HoldsAfterEveryOperation(t *testing.T) {
 		switch next(6) {
 		case 0: // new oracle rate
 			seq++
-			f.mustOK(f.publish(mspIN, signed(realOracle, seq, 80_000_000+int64(next(8_000_000)))))
+			f.mustOK(f.publish(mspOracle, signed(realOracle, seq, 80_000_000+int64(next(8_000_000)))))
 		case 1: // attack: forged rate
-			if r := f.publish(mspFX, signed(fakeOracle, seq+1, 1)); r.Err == nil {
+			if r := f.publish(mspOracle, signed(fakeOracle, seq+1, 1)); r.Err == nil {
 				t.Fatal("forged rate accepted")
 			}
 			rejected++

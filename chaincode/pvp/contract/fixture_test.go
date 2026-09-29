@@ -17,6 +17,7 @@ const (
 	mspFX      = "Org2MSP"
 	mspAuditor = "AuditorMSP"
 	mspRogue   = "RogueMSP"
+	mspOracle  = "OracleMSP"
 )
 
 // Opening balances used by most tests (minor units).
@@ -48,6 +49,7 @@ func initRequest() InitRequest {
 		Config: Config{
 			Banks:           map[string]string{BankIN: mspIN, BankFX: mspFX},
 			AuditorMSPs:     []string{mspAuditor},
+			OracleMSP:       mspOracle,
 			Pair:            "USD/INR",
 			OraclePublicKey: base64.StdEncoding.EncodeToString(realOracle.Public().(ed25519.PublicKey)),
 			OracleName:      "Demo FX Oracle (simulated)",
@@ -85,7 +87,7 @@ func newFixture(t *testing.T) *fixture {
 func newFixtureWithRate(t *testing.T) *fixture {
 	t.Helper()
 	f := newFixture(t)
-	f.mustOK(f.publish(mspIN, signed(realOracle, 1, 83_250_000)))
+	f.mustOK(f.publish(mspOracle, signed(realOracle, 1, 83_250_000)))
 	return f
 }
 

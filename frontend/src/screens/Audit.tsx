@@ -58,7 +58,7 @@ export function Audit({ online }: { online: boolean }) {
             <p className="mt-3 text-xs text-muted">
               {a ? (
                 <>
-                  Queried as <span className="font-mono text-fg-2">{a.queriedAs}</span>. The Auditor does not yet have its own MSP on the channel.
+                  Queried as <span className="font-mono text-fg-2">{a.queriedAs}</span>: the Auditor's own read-only MSP on the channel. It has no peer, so it reads through a bank's peer.
                 </>
               ) : (
                 <Skeleton className="h-3 w-72" />

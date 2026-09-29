@@ -1,0 +1,46 @@
+# Org definitions for the two peerless MSPs that network/add-orgs.sh adds to
+# the channel. Used only with `configtxgen -printOrg`; the channel itself is
+# still created from Drunix's own test-network configtx.
+#
+# Neither org runs a peer, so neither can endorse. Their Endorsement policies
+# name a role no identity of theirs holds and are never referenced: the
+# channel's LifecycleEndorsement and Endorsement are set explicitly to
+# AND(Org1MSP.peer, Org2MSP.peer) by add-orgs.sh.
+Organizations:
+  - &Oracle
+    Name: OracleMSP
+    ID: OracleMSP
+    MSPDir: ../organizations/peerOrganizations/oracle.example.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OracleMSP.admin', 'OracleMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OracleMSP.admin', 'OracleMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OracleMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('OracleMSP.peer')"
+  - &Auditor
+    Name: AuditorMSP
+    ID: AuditorMSP
+    MSPDir: ../organizations/peerOrganizations/auditor.example.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('AuditorMSP.admin', 'AuditorMSP.client')"
+      # Writers lets the auditor's client send proposals to a peer at all
+      # (Fabric checks /Channel/Application/Writers on every proposal,
+      # including queries). The chaincode refuses every write from AuditorMSP.
+      Writers:
+        Type: Signature
+        Rule: "OR('AuditorMSP.admin', 'AuditorMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('AuditorMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('AuditorMSP.peer')"

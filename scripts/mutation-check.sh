@@ -57,6 +57,8 @@ mutate "netting sums both directions instead of netting"  netting.go  's/addChec
 mutate "net batch accepts an already-settled trade"   netting.go  's/case StatusSettled:\n\t\t\treturn nil, nil, nil, reject\(ErrAlreadySettled/case "never":\n\t\t\treturn nil, nil, nil, reject(ErrAlreadySettled/'
 mutate "net batch leaves trades unsettled"            netting.go  's/\t\tt\.Status = StatusSettled\n//'
 mutate "net batch ID replay allowed"                  netting.go  's/\} else if found \{/} else if false \&\& found {/'
+mutate "auditor allowed to publish rates (not read-only)"  contract.go 's/if contains\(cfg\.AuditorMSPs, msp\) \{/if false {/'
+mutate "oracle-org gate on PublishRate removed"       contract.go 's/if cfg\.OracleMSP != "" \&\& msp != cfg\.OracleMSP \{/if false {/'
 echo "killed: $pass   survived/not-applied: $fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]

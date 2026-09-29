@@ -26,7 +26,7 @@ func TestLists_ReturnEverythingInOrderPastTheScanCap(t *testing.T) {
 	}
 	const nRates = 12 // seq 1 from the fixture, then 2..12
 	for seq := int64(2); seq <= nRates; seq++ {
-		f.mustOK(f.publish(mspIN, signed(realOracle, seq, 83_250_000+seq)))
+		f.mustOK(f.publish(mspOracle, signed(realOracle, seq, 83_250_000+seq)))
 	}
 
 	var trades []Trade
