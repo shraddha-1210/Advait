@@ -1,7 +1,7 @@
 // Command pvpctl runs one-off ledger operations against the Drunix network.
 //
 //	pvpctl init <oracle.pub>                      pin config + issue opening balances (once)
-//	pvpctl publish <oracle.key> <rateMicros>      oracle-sign the next rate seq and publish it
+//	pvpctl publish <oracle.key> <rateMicros>      oracle-sign the next rate seq and publish it as OracleMSP
 //	pvpctl query <Function> [args...]             evaluate a query as BankIN
 //
 // Env: DRUNIX_ORGS (default /root/drunix/drunix-network/test-network/organizations)
@@ -50,7 +50,8 @@ func main() {
 		}
 		req := map[string]any{
 			"banks":           map[string]string{"BANKIN": c.MSPID(ledger.BankIN), "BANKFX": c.MSPID(ledger.BankFX)},
-			"auditorMsps":     []string{},
+			"auditorMsps":     []string{c.MSPID(ledger.Auditor)},
+			"oracleMsp":       c.MSPID(ledger.Oracle),
 			"pair":            oracle.Pair,
 			"oraclePublicKey": strings.TrimSpace(string(pub)),
 			"oracleName":      oracle.Source,
@@ -78,7 +79,7 @@ func main() {
 		var rates struct{ Head int64 }
 		_ = json.Unmarshal(raw, &rates)
 		att, _ := json.Marshal(s.Sign(rates.Head+1, rate, time.Now()))
-		report(c.Submit(ledger.BankIN, "PublishRate", []string{string(att)}, ledger.SubmitOptions{}))
+		report(c.Submit(ledger.Oracle, "PublishRate", []string{string(att)}, ledger.SubmitOptions{}))
 	case "query":
 		if len(os.Args) < 3 {
 			usage()

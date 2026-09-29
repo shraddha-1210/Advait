@@ -397,8 +397,8 @@ func TestThreatMatrixOnRealNetwork(t *testing.T) {
 	c := direct(t)
 	for _, name := range []string{
 		"double-settle", "replay-instruction", "unilateral-instruction", "forged-instruction",
-		"mismatched-instruction", "unsigned-rate", "tampered-rate", "fake-oracle", "stale-rate",
-		"out-of-band-rate", "negative-amount", "overflow-amount", "reinit",
+		"mismatched-instruction", "bank-publishes-rate", "unsigned-rate", "tampered-rate", "fake-oracle", "stale-rate",
+		"out-of-band-rate", "negative-amount", "overflow-amount", "auditor-writes", "reinit",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var rep attackReport

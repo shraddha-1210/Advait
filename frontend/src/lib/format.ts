@@ -54,6 +54,8 @@ export function shortHash(h: string | undefined, n = 10): string {
 export function bankLabel(b: string): string {
   if (b === 'BANKIN') return 'BankIN'
   if (b === 'BANKFX') return 'BankFX'
+  if (b === 'ORACLE') return 'Oracle'
+  if (b === 'AUDITOR') return 'Auditor'
   return b
 }
 

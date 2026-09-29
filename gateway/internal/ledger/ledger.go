@@ -2,8 +2,9 @@
 // service on each bank's lite peer and submits/evaluates chaincode calls.
 //
 // Demo simplification (stated in the README): this one process holds a
-// client identity for each bank so a single UI can drive both sides. In a
-// real deployment each bank signs with its own keys inside its own systems.
+// client identity for each bank, the Oracle and the Auditor so a single UI
+// can drive every side. In a real deployment each org signs with its own keys
+// inside its own systems.
 package ledger
 
 import (
@@ -32,6 +33,11 @@ type Party string
 const (
 	BankIN Party = "BANKIN"
 	BankFX Party = "BANKFX"
+	// Oracle and Auditor are their own MSPs on the channel (network/add-orgs.sh)
+	// but run no peers, so their clients reach the ledger through a bank's
+	// lite peer. The peer authenticates their MSP from the signed proposal.
+	Oracle  Party = "ORACLE"
+	Auditor Party = "AUDITOR"
 )
 
 // PartyConfig describes one client identity and the peer it talks to.
@@ -52,25 +58,30 @@ type Config struct {
 }
 
 // DefaultConfig matches the Drunix test network (see NOTES.md D3):
-// Org1 lite peer :7051, Org2 lite peer :9051.
+// Org1 lite peer :7051, Org2 lite peer :9051. The peerless Oracle and
+// Auditor orgs use Org1's lite peer as their gateway.
 func DefaultConfig(orgsDir string) Config {
-	p := func(party Party, msp, org, port string) PartyConfig {
-		base := filepath.Join(orgsDir, "peerOrganizations", org+".example.com")
-		user := filepath.Join(base, "users", "User1@"+org+".example.com", "msp")
+	// p: the client identity is User1 of org `org`; the gateway peer is the
+	// lite peer of org `peerOrg` on `port`.
+	p := func(party Party, msp, org, peerOrg, port string) PartyConfig {
+		user := filepath.Join(orgsDir, "peerOrganizations", org+".example.com", "users", "User1@"+org+".example.com", "msp")
+		peerBase := filepath.Join(orgsDir, "peerOrganizations", peerOrg+".example.com")
 		return PartyConfig{
 			Party: party, MSPID: msp,
 			CertPath:     filepath.Join(user, "signcerts"),
 			KeyPath:      filepath.Join(user, "keystore"),
-			TLSCACert:    filepath.Join(base, "peers", "peer0."+org+".example.com", "tls", "ca.crt"),
+			TLSCACert:    filepath.Join(peerBase, "peers", "peer0."+peerOrg+".example.com", "tls", "ca.crt"),
 			PeerEndpoint: "localhost:" + port,
-			PeerHostname: "peer0." + org + ".example.com",
+			PeerHostname: "peer0." + peerOrg + ".example.com",
 		}
 	}
 	return Config{
 		Channel: "mychannel", Chaincode: "pvp",
 		Parties: []PartyConfig{
-			p(BankIN, "Org1MSP", "org1", "7051"),
-			p(BankFX, "Org2MSP", "org2", "9051"),
+			p(BankIN, "Org1MSP", "org1", "org1", "7051"),
+			p(BankFX, "Org2MSP", "org2", "org2", "9051"),
+			p(Oracle, "OracleMSP", "oracle", "org1", "7051"),
+			p(Auditor, "AuditorMSP", "auditor", "org1", "7051"),
 		},
 	}
 }

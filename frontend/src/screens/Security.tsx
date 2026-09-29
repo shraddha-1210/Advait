@@ -16,9 +16,12 @@ const GROUPS: { title: string; names: string[] }[] = [
     title: 'Instruction and settlement attacks',
     names: ['double-settle', 'replay-instruction', 'unilateral-instruction', 'forged-instruction', 'mismatched-instruction', 'underfunded'],
   },
-  { title: 'FX rate attacks', names: ['unsigned-rate', 'tampered-rate', 'fake-oracle', 'stale-rate', 'out-of-band-rate'] },
+  {
+    title: 'FX rate attacks',
+    names: ['bank-publishes-rate', 'unsigned-rate', 'tampered-rate', 'fake-oracle', 'stale-rate', 'out-of-band-rate'],
+  },
   { title: 'Amount and supply attacks', names: ['negative-amount', 'overflow-amount', 'reinit'] },
-  { title: 'Endorsement and network', names: ['unilateral-endorsement', 'bank-offline'] },
+  { title: 'Endorsement, roles and network', names: ['unilateral-endorsement', 'auditor-writes', 'bank-offline'] },
 ]
 
 

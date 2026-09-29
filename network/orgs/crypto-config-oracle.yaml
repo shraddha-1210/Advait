@@ -1,0 +1,10 @@
+# cryptogen input for the Oracle org: an MSP with no peers (a CA, an admin and
+# one client user). Used by network/add-orgs.sh.
+PeerOrgs:
+  - Name: Oracle
+    Domain: oracle.example.com
+    EnableNodeOUs: true
+    Template:
+      Count: 0
+    Users:
+      Count: 1

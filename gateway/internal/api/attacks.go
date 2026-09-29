@@ -56,13 +56,15 @@ var catalogue = []AttackInfo{
 		"Submit an instruction that claims to come from BankIN, committing BankIN to pay.", "ERR_FORGED_INSTRUCTION", "endorse"},
 	{"mismatched-instruction", "Malicious org forges", "BankFX (hostile)",
 		"BankIN instructs 10,000 USD. BankFX 'matches' it with 9,000 USD, hoping the smaller figure settles.", "ERR_INSTRUCTION_MISMATCH", "endorse"},
-	{"unsigned-rate", "Poisoned / unsigned / stale FX rate", "BankFX (hostile)",
-		"Publish an FX rate with no oracle signature.", "ERR_ATTESTATION_UNSIGNED", "endorse"},
-	{"tampered-rate", "Poisoned / unsigned / stale FX rate", "BankFX (hostile)",
+	{"bank-publishes-rate", "Poisoned / unsigned / stale FX rate", "BankFX (hostile)",
+		"Publish a genuinely oracle-signed rate itself instead of through the oracle org. Only OracleMSP may publish rates.", "ERR_UNAUTHORIZED", "endorse"},
+	{"unsigned-rate", "Poisoned / unsigned / stale FX rate", "Hostile relay through the oracle org's identity",
+		"Publish an FX rate with no oracle signature. The org identity alone is not enough.", "ERR_ATTESTATION_UNSIGNED", "endorse"},
+	{"tampered-rate", "Poisoned / unsigned / stale FX rate", "Hostile relay through the oracle org's identity",
 		"Take a genuine oracle-signed rate and change the number, keeping the signature.", "ERR_ATTESTATION_BAD_SIGNATURE", "endorse"},
-	{"fake-oracle", "Malicious org colludes with a bad oracle", "BankFX + colluding oracle",
-		"Publish a rate correctly signed by a different key (an oracle the ledger never pinned).", "ERR_ATTESTATION_BAD_SIGNATURE", "endorse"},
-	{"stale-rate", "Poisoned / unsigned / stale FX rate", "BankFX (hostile)",
+	{"fake-oracle", "Malicious org colludes with a bad oracle", "Colluding oracle key, relayed by the oracle org",
+		"Publish a rate correctly signed by a different key (an oracle key the ledger never pinned).", "ERR_ATTESTATION_BAD_SIGNATURE", "endorse"},
+	{"stale-rate", "Poisoned / unsigned / stale FX rate", "Hostile relay through the oracle org's identity",
 		"Re-publish an old, genuinely oracle-signed rate to price trades at yesterday's number.", "ERR_ATTESTATION_STALE", "endorse"},
 	{"out-of-band-rate", "Poisoned / unsigned / stale FX rate", "BankIN (hostile)",
 		"Price the INR leg 5% away from the attested rate (an off-ledger 'side deal').", "ERR_RATE_MISMATCH", "endorse"},
@@ -70,6 +72,8 @@ var catalogue = []AttackInfo{
 		"Instruct a negative USD amount, hoping to reverse the direction of payment.", "ERR_INVALID_AMOUNT", "endorse"},
 	{"overflow-amount", "Negative / overflow amount", "BankFX (hostile)",
 		"Instruct 9223372036854775808 cents (one more than int64 can hold), hoping to wrap around.", "ERR_AMOUNT_OVERFLOW", "endorse"},
+	{"auditor-writes", "Read-only regulator org tries to move value", "Auditor (AuditorMSP)",
+		"The Auditor's own identity tries to settle a matched trade. The Auditor is read-only.", "ERR_UNAUTHORIZED", "endorse"},
 	{"reinit", "Value-conservation breach (create value)", "BankFX (hostile)",
 		"Re-run InitLedger with its own oracle key and a huge USD balance, i.e. mint money.", "ERR_ALREADY_INITIALIZED", "endorse"},
 	{"bank-offline", "Peer down (one bank offline)", "Network failure",
@@ -270,26 +274,32 @@ func (s *Server) attack(info AttackInfo) (*AttackReport, error) {
 		fn, args = "SubmitInstruction", []string{instructionJSON(lie)}
 		rep.Attempt = fmt.Sprintf("BankIN instructed 10,000.00 USD on %s; BankFX instructs 9,000.00 USD", id)
 
+	case "bank-publishes-rate":
+		a := s.Oracle.Sign(seq+1, 70_000_000, time.Now())
+		raw, _ := json.Marshal(a)
+		fn, args = "PublishRate", []string{string(raw)}
+		rep.Attempt = fmt.Sprintf("BankFX (%s) submits a validly oracle-signed rate seq %d = 70.000000 itself", s.L.MSPID(ledger.BankFX), seq+1)
+
 	case "unsigned-rate":
 		a := s.Oracle.Sign(seq+1, 70_000_000, time.Now())
 		a.Signature = ""
 		raw, _ := json.Marshal(a)
-		fn, args = "PublishRate", []string{string(raw)}
-		rep.Attempt = fmt.Sprintf("BankFX publishes rate seq %d = 70.000000 with no signature", seq+1)
+		party, fn, args = ledger.Oracle, "PublishRate", []string{string(raw)}
+		rep.Attempt = fmt.Sprintf("The oracle org's identity (%s) submits rate seq %d = 70.000000 with no signature", s.L.MSPID(ledger.Oracle), seq+1)
 
 	case "tampered-rate":
 		a := s.Oracle.Sign(seq+1, 83_250_000, time.Now())
 		a.RateMicros = 70_000_000
 		raw, _ := json.Marshal(a)
-		fn, args = "PublishRate", []string{string(raw)}
-		rep.Attempt = fmt.Sprintf("BankFX takes the oracle's signed seq %d rate of 83.250000 and edits it to 70.000000", seq+1)
+		party, fn, args = ledger.Oracle, "PublishRate", []string{string(raw)}
+		rep.Attempt = fmt.Sprintf("Through the oracle org's identity, the oracle's signed seq %d rate of 83.250000 is edited to 70.000000", seq+1)
 
 	case "fake-oracle":
 		rogue := oracle.New()
 		a := rogue.Sign(seq+1, 70_000_000, time.Now())
 		raw, _ := json.Marshal(a)
-		fn, args = "PublishRate", []string{string(raw)}
-		rep.Attempt = fmt.Sprintf("BankFX publishes seq %d = 70.000000, validly signed by a colluding oracle key %s…", seq+1, rogue.PublicKey()[:12])
+		party, fn, args = ledger.Oracle, "PublishRate", []string{string(raw)}
+		rep.Attempt = fmt.Sprintf("The oracle org's identity submits seq %d = 70.000000, validly signed by a colluding key %s… that was never pinned", seq+1, rogue.PublicKey()[:12])
 
 	case "stale-rate":
 		raw, err := s.L.Evaluate(ledger.BankFX, "GetRates")
@@ -304,8 +314,8 @@ func (s *Server) attack(info AttackInfo) (*AttackReport, error) {
 		}
 		old := rates.Rates[0] // the oldest genuine attestation (decoding drops ledger-only fields)
 		b, _ := json.Marshal(old)
-		fn, args = "PublishRate", []string{string(b)}
-		rep.Attempt = fmt.Sprintf("BankFX re-publishes the genuine oracle rate seq %d (%d micros); the ledger is at seq %d", old.Seq, old.RateMicros, seq)
+		party, fn, args = ledger.Oracle, "PublishRate", []string{string(b)}
+		rep.Attempt = fmt.Sprintf("The oracle org's identity re-publishes the genuine oracle rate seq %d (%d micros); the ledger is at seq %d", old.Seq, old.RateMicros, seq)
 
 	case "out-of-band-rate":
 		inr, err := s.quoteINR(10_000_00, seq)
@@ -344,6 +354,16 @@ func (s *Server) attack(info AttackInfo) (*AttackReport, error) {
 		})
 		fn, args = "InitLedger", []string{string(req)}
 		rep.Attempt = "BankFX calls InitLedger with its own oracle key and a 9.99 trillion USD balance"
+
+	case "auditor-writes":
+		id := newTradeID("ATK-AUD")
+		rep.TradeID = id
+		if err := s.matchedTrade(&rep.Setup, id, "BANKFX", 100_00); err != nil {
+			return nil, err
+		}
+		party, fn, args = ledger.Auditor, "SettleTrade", []string{id}
+		rep.Attempt = fmt.Sprintf("The Auditor (%s) calls SettleTrade(%s) on a valid, funded, matched trade", s.L.MSPID(ledger.Auditor), id)
+		rep.Note = "The trade stays MATCHED and can still be settled by a bank."
 
 	case "bank-offline":
 		return s.bankOffline(rep)

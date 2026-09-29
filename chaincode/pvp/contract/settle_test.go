@@ -195,7 +195,7 @@ func TestQueriesAreReadOnlyAndAuditLogOrdered(t *testing.T) {
 func TestDeterministicAcrossPeers(t *testing.T) {
 	run := func() map[string]string {
 		f := newFixtureWithRate(t)
-		f.mustOK(f.publish(mspFX, signed(realOracle, 2, 83_310_000)))
+		f.mustOK(f.publish(mspOracle, signed(realOracle, 2, 83_310_000)))
 		f.matched("A", BankFX, 12_345_67, 2)
 		f.mustOK(f.settle(mspIN, "A"))
 		f.matched("B", BankIN, 1_000_00, 2)

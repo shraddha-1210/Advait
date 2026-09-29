@@ -181,8 +181,11 @@ func rawJSON(b []byte) json.RawMessage {
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.L.Evaluate(ledger.BankIN, "GetConfig")
 	resp := map[string]any{
-		"parties": map[string]string{"BANKIN": s.L.MSPID(ledger.BankIN), "BANKFX": s.L.MSPID(ledger.BankFX)},
-		"oracle":  s.Oracle.PublicKey(),
+		"parties": map[string]string{
+			"BANKIN": s.L.MSPID(ledger.BankIN), "BANKFX": s.L.MSPID(ledger.BankFX),
+			"ORACLE": s.L.MSPID(ledger.Oracle), "AUDITOR": s.L.MSPID(ledger.Auditor),
+		},
+		"oracle": s.Oracle.PublicKey(),
 	}
 	if err != nil {
 		resp["ok"], resp["error"] = false, err.Error()
@@ -215,32 +218,25 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
-	logRaw, err := s.L.Evaluate(ledger.BankIN, "GetAuditLog")
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
-		return
+	// Every read is made with the Auditor's own identity (AuditorMSP), a
+	// channel member with no peer and no write rights in the chaincode.
+	read := func(fn string) (json.RawMessage, error) {
+		raw, err := s.L.Evaluate(ledger.Auditor, fn)
+		if err != nil {
+			return nil, err
+		}
+		return rawJSON(raw), nil
 	}
-	trades, err := s.L.Evaluate(ledger.BankIN, "GetTrades")
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
-		return
+	out := map[string]any{"queriedAs": "AUDITOR (" + s.L.MSPID(ledger.Auditor) + ")"}
+	for key, fn := range map[string]string{"log": "GetAuditLog", "trades": "GetTrades", "rates": "GetRates", "invariant": "CheckInvariant"} {
+		v, err := read(fn)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		out[key] = v
 	}
-	rates, err := s.L.Evaluate(ledger.BankIN, "GetRates")
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
-		return
-	}
-	inv, err := s.L.Evaluate(ledger.BankIN, "CheckInvariant")
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		// IMPLEMENTATION GAP: queried with BankIN's identity until the
-		// Auditor has its own MSP on the channel (NOTES.md, decision A).
-		"queriedAs": "BANKIN (" + s.L.MSPID(ledger.BankIN) + ")",
-		"log":       rawJSON(logRaw), "trades": rawJSON(trades), "rates": rawJSON(rates), "invariant": rawJSON(inv),
-	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) quote(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +312,7 @@ func (s *Server) publishRate(w http.ResponseWriter, r *http.Request) {
 	}
 	att := s.Oracle.Sign(head+1, body.RateMicros, time.Now())
 	raw, _ := json.Marshal(att)
-	res, err := s.submitWithSnapshots(ledger.BankIN, "PublishRate", []string{string(raw)}, ledger.SubmitOptions{}, "",
+	res, err := s.submitWithSnapshots(ledger.Oracle, "PublishRate", []string{string(raw)}, ledger.SubmitOptions{}, "",
 		fmt.Sprintf("oracle publishes rate seq %d = %d micros", att.Seq, att.RateMicros))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
