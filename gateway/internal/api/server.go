@@ -46,9 +46,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/audit", s.audit)
 	mux.HandleFunc("GET /api/quote", s.quote)
 	mux.HandleFunc("GET /api/rejections", s.rejections)
+	mux.HandleFunc("GET /api/trades/{id}", s.trade)
 	mux.HandleFunc("POST /api/oracle/rates", s.publishRate)
 	mux.HandleFunc("POST /api/instructions", s.instruct)
 	mux.HandleFunc("POST /api/trades/{id}/settle", s.settle)
+	mux.HandleFunc("POST /api/net-preview", s.netPreview)
+	mux.HandleFunc("POST /api/net-settle", s.netSettle)
 	mux.HandleFunc("GET /api/attacks", s.attackCatalogue)
 	mux.HandleFunc("POST /api/attacks/{name}", s.runAttack)
 	return cors(logging(mux))
@@ -248,6 +251,31 @@ func (s *Server) quote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rawJSON(out))
+}
+
+// trade reads one trade and both banks' stored instructions with GetTrade,
+// a point read of one key. The UI uses it to show a trade it just created or
+// that a user opens by ID, without re-reading the whole list.
+func (s *Server) trade(w http.ResponseWriter, r *http.Request) {
+	out, err := s.L.Evaluate(ledger.BankIN, "GetTrade", r.PathValue("id"))
+	if err != nil {
+		writeErr(w, tradeReadStatus(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rawJSON(out))
+}
+
+// tradeReadStatus maps a GetTrade failure to an HTTP status: the chaincode's
+// own "no such trade" and "bad id" refusals are client errors, anything else
+// means the gateway could not get an answer from the ledger.
+func tradeReadStatus(err error) int {
+	switch msg := err.Error(); {
+	case strings.Contains(msg, "ERR_TRADE_NOT_FOUND"):
+		return http.StatusNotFound
+	case strings.Contains(msg, "ERR_INVALID_INPUT"):
+		return http.StatusBadRequest
+	}
+	return http.StatusBadGateway
 }
 
 func (s *Server) rejections(w http.ResponseWriter, r *http.Request) {

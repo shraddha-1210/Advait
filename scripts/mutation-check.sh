@@ -51,6 +51,12 @@ mutate "rounding half-up changed to truncation"       money.go    's/p\.Add\(p, 
 mutate "re-init allowed"                              contract.go 's/if existing != nil \{\n\t\treturn reject\(ErrAlreadyInitialized/if false {\n\t\treturn reject(ErrAlreadyInitialized/'
 mutate "unknown JSON fields silently ignored"         contract.go 's/dec\.DisallowUnknownFields\(\)/_ = 0/'
 mutate "non-bank submitter allowed to move value"     ledger.go   's/return "", msp, reject\(ErrUnauthorized/return BankIN, msp, nil; _ = reject(ErrUnauthorized/'
+mutate "list scan not paginated (Drunix 10-row cap)"   contract.go 's/it, _, err := stub\.GetStateByPartialCompositeKeyWithPagination\(objectType, \[\]string\{\}, maxListPage, ""\)/it, err := stub.GetStateByPartialCompositeKey(objectType, []string{})/'
+mutate "balance scan truncation not detected"         ledger.go   's/if fetched\+\+; fetched >= unpagedScanCap \{/if fetched++; false {/'
+mutate "netting sums both directions instead of netting"  netting.go  's/addChecked\(plan\.GrossByPayer\[BankIN\]\[ccy\], -plan\.GrossByPayer\[BankFX\]\[ccy\]\)/addChecked(plan.GrossByPayer[BankIN][ccy], plan.GrossByPayer[BankFX][ccy])/'
+mutate "net batch accepts an already-settled trade"   netting.go  's/case StatusSettled:\n\t\t\treturn nil, nil, nil, reject\(ErrAlreadySettled/case "never":\n\t\t\treturn nil, nil, nil, reject(ErrAlreadySettled/'
+mutate "net batch leaves trades unsettled"            netting.go  's/\t\tt\.Status = StatusSettled\n//'
+mutate "net batch ID replay allowed"                  netting.go  's/\} else if found \{/} else if false \&\& found {/'
 echo "killed: $pass   survived/not-applied: $fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]

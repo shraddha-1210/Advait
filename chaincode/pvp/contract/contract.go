@@ -737,35 +737,85 @@ func (c *PvPContract) GetTrades(ctx contractapi.TransactionContextInterface) (st
 }
 
 // GetAuditLog returns the append-only audit log, oldest first.
+//
+// Entries are numbered 1..LOGHEAD with no gaps (appendLog), so they are read
+// by point lookups rather than a range scan. That is exact and ordered on any
+// state database, including Drunix's SQL one, whose range scans are capped
+// and unordered (see scan).
 func (c *PvPContract) GetAuditLog(ctx contractapi.TransactionContextInterface) (string, error) {
-	entries := []LogEntry{}
-	if err := scan(ctx.GetStub(), keyLog, func(raw []byte) error {
+	stub := ctx.GetStub()
+	hk, err := key(stub, keyLogHead)
+	if err != nil {
+		return "", err
+	}
+	var head int64
+	if _, err := getJSON(stub, hk, &head); err != nil {
+		return "", err
+	}
+	entries := make([]LogEntry, 0, head)
+	for n := int64(1); n <= head; n++ {
+		lk, err := key(stub, keyLog, seqAttr(n))
+		if err != nil {
+			return "", err
+		}
 		var e LogEntry
-		if err := json.Unmarshal(raw, &e); err != nil {
-			return err
+		found, err := getJSON(stub, lk, &e)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			// The log is append-only and gap-free; a hole means state is not
+			// what this chaincode wrote. Fail closed rather than skip it.
+			return "", reject(ErrInternal, "audit log entry %d of %d is missing", n, head)
 		}
 		entries = append(entries, e)
-		return nil
-	}); err != nil {
-		return "", err
 	}
 	return toJSON(entries)
 }
 
+// maxListPage bounds one read-only list query (see scan).
+const maxListPage = 10_000
+
 // scan visits every value under a composite-key prefix, in key order.
+//
+// It uses a paginated query because on Drunix's SQL state database a plain
+// range scan is a paginated scan with a fixed page size of 10
+// (statesqldb.GetStateRangeScanIterator), so it silently drops everything
+// after the 10th row. Drunix's bookmarks do not resume a scan (its scanner
+// always restarts at offset 0), so this asks for one page of maxListPage and
+// fails closed if that page is full instead of returning a partial list.
+// Drunix also returns rows unordered and a row may repeat (LIMIT/OFFSET with
+// no ORDER BY), so rows are de-duplicated by key and visited in key order.
+//
+// Fabric only allows paginated queries in read-only transactions, so scan
+// must only be called from query functions, never from one that writes.
 func scan(stub shim.ChaincodeStubInterface, objectType string, visit func([]byte) error) error {
-	it, err := stub.GetStateByPartialCompositeKey(objectType, []string{})
+	it, _, err := stub.GetStateByPartialCompositeKeyWithPagination(objectType, []string{}, maxListPage, "")
 	if err != nil {
 		return reject(ErrInternal, "scan %s: %v", objectType, err)
 	}
 	defer it.Close()
+	rows := map[string][]byte{}
+	fetched := 0
 	for it.HasNext() {
 		kv, err := it.Next()
 		if err != nil {
 			return reject(ErrInternal, "scan %s: %v", objectType, err)
 		}
-		if err := visit(kv.Value); err != nil {
-			return reject(ErrInternal, "decode %s: %v", kv.Key, err)
+		fetched++
+		rows[kv.Key] = kv.Value
+	}
+	if fetched >= maxListPage {
+		return reject(ErrInternal, "scan %s returned a full page of %d rows; refusing to return a list that may be incomplete", objectType, maxListPage)
+	}
+	keys := make([]string, 0, len(rows))
+	for k := range rows {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := visit(rows[k]); err != nil {
+			return reject(ErrInternal, "decode %s: %v", k, err)
 		}
 	}
 	return nil
