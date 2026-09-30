@@ -24,11 +24,12 @@ import (
 	"time"
 
 	"github.com/advait/pvp-settlement/gateway/internal/ledger"
+	"github.com/advait/pvp-settlement/gateway/internal/paths"
 )
 
 var (
 	baseURL = envOr("GATEWAY_URL", "http://localhost:8080")
-	orgsDir = envOr("DRUNIX_ORGS", "/root/drunix/drunix-network/test-network/organizations")
+	orgsDir = paths.OrgsDir() // DRUNIX_ORGS, else $DRUNIX_HOME/..., else /root/drunix/...
 )
 
 func envOr(k, d string) string {

@@ -43,11 +43,11 @@ export function Card({
 export type Tone = 'ok' | 'bad' | 'warn' | 'neutral' | 'accent'
 
 const toneClass: Record<Tone, string> = {
-  ok: 'bg-ok-soft text-ok ring-ok-line',
-  bad: 'bg-bad-soft text-bad ring-bad-line',
-  warn: 'bg-warn-soft text-warn ring-warn-line',
-  neutral: 'bg-surface-2 text-muted ring-line-strong',
-  accent: 'bg-accent-soft text-accent-fg ring-accent/25',
+  ok: 'bg-ok-soft text-ok ring-ok-line font-medium',
+  bad: 'bg-bad-soft text-bad ring-bad-line font-medium',
+  warn: 'bg-warn-soft text-warn ring-warn-line font-medium',
+  neutral: 'bg-surface-2 text-fg-2 ring-line-strong font-medium',
+  accent: 'bg-accent-soft text-accent-fg ring-accent/30 font-medium',
 }
 
 /** Status chip: tint + hairline ring + icon + label. Never colour alone. */
@@ -128,7 +128,7 @@ export function Button({
     'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none disabled:filter-none'
   const v = {
     primary: 'btn-primary',
-    secondary: 'bg-surface text-fg shadow-[0_1px_2px_rgba(17,24,56,0.06)] ring-1 ring-inset ring-line-strong hover:bg-surface-2',
+    secondary: 'bg-surface text-fg shadow-[0_1px_3px_rgba(76,29,149,0.08)] ring-1 ring-inset ring-line-strong hover:bg-surface-2 hover:ring-accent/50',
     danger: 'bg-bad-soft text-bad ring-1 ring-inset ring-bad-line hover:bg-bad/15',
     ghost: 'text-muted hover:bg-surface-2 hover:text-fg',
   }[variant]

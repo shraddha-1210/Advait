@@ -4,7 +4,7 @@
 //	pvpctl publish <oracle.key> <rateMicros>      oracle-sign the next rate seq and publish it as OracleMSP
 //	pvpctl query <Function> [args...]             evaluate a query as BankIN
 //
-// Env: DRUNIX_ORGS (default /root/drunix/drunix-network/test-network/organizations)
+// Env: DRUNIX_HOME (default /root/drunix), DRUNIX_ORGS (default $DRUNIX_HOME/drunix-network/test-network/organizations)
 package main
 
 import (
@@ -17,6 +17,7 @@ import (
 
 	"github.com/advait/pvp-settlement/gateway/internal/ledger"
 	"github.com/advait/pvp-settlement/gateway/internal/oracle"
+	"github.com/advait/pvp-settlement/gateway/internal/paths"
 )
 
 // Opening balances for the demo (minor units). Simulated tokenized cash.
@@ -29,9 +30,9 @@ func main() {
 	if len(os.Args) < 2 {
 		usage()
 	}
-	orgs := os.Getenv("DRUNIX_ORGS")
-	if orgs == "" {
-		orgs = "/root/drunix/drunix-network/test-network/organizations"
+	orgs := paths.OrgsDir()
+	if err := paths.CheckOrgsDir(orgs); err != nil {
+		fail(err)
 	}
 	c, err := ledger.Connect(ledger.DefaultConfig(orgs))
 	if err != nil {
@@ -47,6 +48,15 @@ func main() {
 		pub, err := os.ReadFile(os.Args[2])
 		if err != nil {
 			fail(err)
+		}
+		// The key is pinned forever, so refuse a public key that this
+		// machine's oracle.key cannot sign for (e.g. an oracle.pub pulled
+		// from another PC): no rate could ever be published afterwards.
+		if keyPath, err := paths.OracleKey(); err == nil {
+			if s, err := oracle.Load(keyPath); err == nil && s.PublicKey() != strings.TrimSpace(string(pub)) {
+				fail(fmt.Errorf("%s does not match %s (its public key is %s); regenerate both with: oracle keygen network/oracle",
+					os.Args[2], keyPath, s.PublicKey()))
+			}
 		}
 		req := map[string]any{
 			"banks":           map[string]string{"BANKIN": c.MSPID(ledger.BankIN), "BANKFX": c.MSPID(ledger.BankFX)},

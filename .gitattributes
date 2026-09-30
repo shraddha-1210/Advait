@@ -1,1 +1,14 @@
+# Same bytes on every PC: every text file is checked out with LF line endings,
+# whatever the machine's core.autocrlf says. Git detects binary files itself.
+* text=auto eol=lf
 *.sh text eol=lf
+# Go sources are patched by scripts/mutation-check.sh with multi-line perl
+# patterns that expect LF. Force LF so a Windows checkout (core.autocrlf=true)
+# does not silently break them.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+# Binary assets, never converted.
+*.png binary
+*.jpg binary
+*.ico binary
