@@ -212,8 +212,9 @@ func loadRate(stub shim.ChaincodeStubInterface, seq int64) (*RateRecord, error) 
 	return &r, nil
 }
 
-// checkRateUsable enforces freshness (the rate must be one of the latest
-// RateWindow published) and that the INR leg is exactly the USD leg at the
+// checkRateUsable enforces freshness (the rate's seq must be within
+// RateWindow of the latest published seq; seq gaps are allowed, so fewer than
+// RateWindow rates may be usable) and that the INR leg is exactly the USD leg at the
 // attested rate. Freshness is by oracle sequence, not by clock: chaincode
 // must be deterministic, and a submitter can choose its own tx timestamp.
 func checkRateUsable(stub shim.ChaincodeStubInterface, cfg *Config, seq, usd, inr int64) (*RateRecord, error) {
@@ -230,7 +231,7 @@ func checkRateUsable(stub shim.ChaincodeStubInterface, cfg *Config, seq, usd, in
 	}
 	if seq <= head-int64(cfg.RateWindow) {
 		return nil, reject(ErrAttestationStale,
-			"rate seq %d is stale: the oracle has since published up to seq %d and only the latest %d are accepted",
+			"rate seq %d is stale: the latest published seq is %d and a rate is usable only if its seq is within %d of it (seq gaps are allowed)",
 			seq, head, cfg.RateWindow)
 	}
 	expected, err := ConvertUSDToINR(usd, r.RateMicros)

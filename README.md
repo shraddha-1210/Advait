@@ -75,7 +75,7 @@ flowchart LR
 
 **A trade that settles**
 
-1. **Oracle publishes a rate.** The oracle signs a USD/INR rate with a sequence number, for example seq 1 = 83.250000. The OracleMSP identity submits it with `PublishRate`. The chaincode refuses any other submitter, checks the signature against the pinned key and requires the sequence number to be higher than any rate already published. It then stores the rate.
+1. **Oracle publishes a rate.** The oracle signs a USD/INR rate with a sequence number, for example seq 1 = 83.250000. The OracleMSP identity submits it with `PublishRate`. The chaincode refuses any other submitter, checks the signature against the pinned key and requires the sequence number to be higher than any rate already published. It does not require the next number: gaps are allowed (live, a signed seq 8 was accepted when the latest was seq 3). It then stores the rate.
 2. **The INR amount is quoted by the chaincode.** `QuoteINR` returns the INR leg for a USD amount at a published rate. It uses integer math (paise = cents x rate, rounded half-up), so no client computes the price itself.
 3. **BankIN instructs.** It calls `SubmitInstruction` with the trade ID, which bank pays USD, both amounts and the rate sequence number. The chaincode reads the submitter's MSP from the signed proposal. The instruction must say it comes from that same bank. The trade is now `PENDING_MATCH`.
 4. **BankFX instructs the same terms.** If every term matches, the trade becomes `MATCHED`. If any term differs, the instruction is rejected.
@@ -132,7 +132,7 @@ We treat security as the main feature, not an add-on. Each check below runs in t
 | Genuine signed rate with the number edited | Signature no longer verifies | `ERR_ATTESTATION_BAD_SIGNATURE` | Unit, Live |
 | Rate signed by a colluding oracle key, even submitted by the oracle org | Only the key pinned at init is accepted | `ERR_ATTESTATION_BAD_SIGNATURE` | Unit, Live |
 | Re-publish an old genuine rate | Sequence number must exceed the latest | `ERR_ATTESTATION_STALE` | Unit, Live |
-| Use a rate that has gone stale (at instruction or at settlement) | Only the latest 3 published rates are accepted | `ERR_ATTESTATION_STALE` | Unit |
+| Use a rate that has gone stale (at instruction or at settlement) | Staleness is by sequence number: a rate is usable only if its seq is within 3 of the latest published seq (seq > latest − 3). Because gaps are allowed, fewer than 3 rates can be usable; after a jump from seq 3 to seq 8, only seq 8 was. Only the pinned OracleMSP identity, with the pinned key's signature, can publish, so only the oracle can cause this | `ERR_ATTESTATION_STALE` | Unit |
 | Reference a rate that was never published | Rate must exist on the ledger | `ERR_ATTESTATION_UNKNOWN` | Unit |
 | Price the INR leg off the attested rate, even by 1 paisa | INR leg must equal USD leg x attested rate exactly | `ERR_RATE_MISMATCH` | Unit, Live |
 | Smuggle a field separator into the rate's source name | Field validation | `ERR_INVALID_INPUT` | Unit |
@@ -199,7 +199,7 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - The gateway HTTP API, including all attack scenarios.
 - Bilateral netting (`NetSettle`, `PreviewNet`, `GetBatch`), run live through the gateway and the frontend.
 - A web frontend (`frontend/`, React + TypeScript + Vite + Tailwind) with four screens: Settlement, Netting, Security and Audit. Every figure on it comes from a gateway call. We ran the settle, rollback and attack flows through it against the live network.
-- 55 chaincode unit tests (plus 18 subtests), including 8 for netting and 5 for the Oracle and Auditor roles; 4 gateway unit tests (`gateway/internal/api/`), the 29-bug mutation check, and 13 integration tests against the live 4-org network (the threat-matrix test has 15 subtests; 4 tests use the real OracleMSP and AuditorMSP identities). The peer-down test stops and restarts a real peer container.
+- 55 chaincode unit tests (plus 18 subtests), including 8 for netting and 5 for the Oracle and Auditor roles; 8 gateway unit tests (4 in `gateway/internal/api/`, 4 in `gateway/internal/paths/`), the 29-bug mutation check, and 13 integration tests against the live 4-org network (the threat-matrix test has 15 subtests; 4 tests use the real OracleMSP and AuditorMSP identities). The peer-down test stops and restarts a real peer container.
 
 **Simulated**
 - All balances. The opening balances are 500,000,000.00 INR for BankIN and 5,000,000.00 USD for BankFX. No real money or liquidity is involved.
@@ -236,7 +236,9 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 These are the commands we ran. Run them inside WSL (Ubuntu) as root. Several steps change directory, so first point `ADVAITA` at your checkout (ours is `/mnt/c/Advait`). Every later step `cd`s from it:
 ```bash
 export ADVAITA=/mnt/c/Advait   # path to this repository inside WSL
+export DRUNIX_HOME=/root/drunix # only if you cloned Drunix somewhere else; every script and the gateway read it
 ```
+At any point, `bash "$ADVAITA"/scripts/doctor.sh` checks this machine's setup (Go version, Docker, Drunix binaries and images, network containers, crypto material, oracle key, port 8080) and prints the fix for anything that is wrong. It changes nothing.
 
 **Prerequisites (Windows)**
 - Docker Desktop with WSL2 integration enabled for the Ubuntu distro.
@@ -263,6 +265,10 @@ mkdir -p drunix-network/bin && cp build/bin/* drunix-network/bin/
 docker pull npcioss/drunix-ccenv:1.0      # not pulled automatically (NOTES.md D5)
 docker pull npcioss/drunix-baseos:1.0
 ```
+If a pull fails with `docker-credential-desktop.exe: Invalid argument`, Docker Desktop's credential helper does not work inside WSL (`NOTES.md` E7). Use an empty Docker config for this shell, and keep it set for `network.sh up` and `down` too:
+```bash
+mkdir -p /tmp/dockercfg && echo '{}' > /tmp/dockercfg/config.json && export DOCKER_CONFIG=/tmp/dockercfg
+```
 
 **3. Bring up the network and channel**
 ```bash
@@ -280,7 +286,7 @@ export GOFLAGS=-buildvcs=false   # WSL git refuses the Windows-owned checkout (N
 cd "$ADVAITA"/gateway && go build -o /root/bin/ ./cmd/...
 cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen network/oracle
 ```
-`oracle.key` is git-ignored. Only `oracle.pub` is committed.
+`oracle.key` is git-ignored, so **every clone creates its own key pair**. `keygen` also rewrites `network/oracle/oracle.pub`, so git shows that file as modified on each PC. That is expected; do not commit it. The ledger pins whichever public key `pvpctl init` is given, and only the matching `oracle.key` can publish rates to it. That is why `pvpctl init` refuses an `oracle.pub` that does not match the local `oracle.key`, and why the gateway warns at startup if its key is not the one the ledger pinned.
 
 **5. Deploy the chaincode, initialise the ledger, publish a rate**
 ```bash
@@ -293,8 +299,21 @@ bash network/deploy-cc.sh 1.0                                # policy AND('Org1M
 
 **6. Start the gateway**
 ```bash
-cd "$ADVAITA"/gateway && /root/bin/gateway      # listens on :8080
+bash "$ADVAITA"/scripts/run-gateway.sh   # runs doctor.sh, builds into gateway/bin, listens on :8080
 ```
+It works from any directory. It sets `GOFLAGS=-buildvcs=false` itself, and it refuses to start, printing the fixes, if `doctor.sh` finds a problem. The manual way still works: `cd "$ADVAITA"/gateway && /root/bin/gateway`. The gateway finds `network/oracle/oracle.key` from the repo root or any folder inside it, and reads the crypto material from `$DRUNIX_HOME` (default `/root/drunix`). If you run `network.sh down` and `up` again, the crypto material is regenerated, so restart the gateway afterwards.
+
+**If the gateway will not start** (every message below names its own fix)
+
+| Message | Cause | Fix |
+|---|---|---|
+| `network/oracle/oracle.key not found` | The key is git-ignored, so a fresh clone has none | `oracle keygen network/oracle`, then deploy and `pvpctl init` on a **fresh** network |
+| `Drunix crypto material not found at ...` | Network not up, or Drunix is not at `/root/drunix` | `network.sh up` + `createChannel`, or `export DRUNIX_HOME=<your clone>` |
+| `... has no oracle.example.com` | Oracle and Auditor orgs not added | `bash network/add-orgs.sh` |
+| `error obtaining VCS status` (while building) | WSL git refuses the Windows-owned checkout | use `scripts/run-gateway.sh`, or `export GOFLAGS=-buildvcs=false` |
+| `go.mod requires go >= 1.25.0` | Distro Go is too old | install Go 1.26.1 (step 1) |
+| `address already in use` | Something already on :8080 | stop it, or `ADDR=:8081` and set `VITE_GATEWAY_URL` for the frontend |
+| Starts, then warns `oracle public key ... but this machine's oracle key is ...` | The ledger was initialised on another PC or with another key | use that PC's `oracle.key` (`ORACLE_KEY=...`), or start a fresh network and init with this PC's `oracle.pub` |
 From Windows or WSL:
 ```bash
 curl http://localhost:8080/api/state
@@ -325,9 +344,9 @@ RUN_DISRUPTIVE=1 go test -tags integration ./integration/ -count=1 -v
 
 **8. Run the frontend** (gateway from step 6 must be running)
 ```bash
-cd "$ADVAITA"/frontend && npm install && npm run dev   # http://localhost:5180
+cd "$ADVAITA"/frontend && npm ci && npm run dev   # http://localhost:5180
 ```
-Needs Node.js 20 or later. We ran it from Windows (Node 24): `cd C:\Advait\frontend`, then `npm install` and `npm run dev`. Set `VITE_GATEWAY_URL` if the gateway is not on `http://localhost:8080`. The gateway's CORS rule accepts any `http://localhost:<port>` origin.
+Needs Node.js 20 or later. `npm ci` installs exactly the versions in `package-lock.json`, so every PC gets the same dependencies (`npm install` may update the lock file). We ran it from Windows (Node 24): `cd C:\Advait\frontend`, then `npm ci` and `npm run dev`. Set `VITE_GATEWAY_URL` if the gateway is not on `http://localhost:8080`. The gateway's CORS rule accepts any `http://localhost:<port>` origin.
 
 To start over from an empty ledger, run `./network.sh down` in `/root/drunix/drunix-network/test-network` and repeat steps 3 and 5. We have not scripted this reset yet.
 
@@ -345,6 +364,7 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 - **Trusted bootstrap.** `InitLedger` configuration (bank MSPs, oracle key, opening balances) is trusted once at deployment. It cannot be changed afterwards.
 - **Griefing.** A hostile bank that instructs a trade ID first with bad terms can block the honest bank's instruction for that trade. The system stays safe (nothing moves), but there is no cancel function.
 - **One gateway, both banks' keys.** This is a demo simplification.
+- **The gateway has no authentication.** It listens on all interfaces (`*:8080`), so anyone who can reach that port can submit transactions as either bank and can publish rates signed with the real oracle key (`POST /api/oracle/rates`). This is a demo convenience, not a production design; run it only on a trusted machine or network.
 - **Drunix-specific behaviour.** Several findings are logged in `NOTES.md`. For example, block validation flags read VALID even for a transaction that was invalidated (D8), so we check rejections through state and commit status instead.
 
 **Future work**

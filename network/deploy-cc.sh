@@ -13,6 +13,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRUNIX_HOME="${DRUNIX_HOME:-/root/drunix}"
 export PATH="$PATH:$DRUNIX_HOME/drunix-network/bin"
 export FABRIC_CFG_PATH="$DRUNIX_HOME/drunix-network/config"
+# Packaging runs `go` on this Windows-owned checkout from WSL, where git refuses
+# to report VCS status ("dubious ownership") and the build fails (NOTES.md E8).
+export GOFLAGS="${GOFLAGS:--buildvcs=false}"
 
 cd "$DRUNIX_HOME/drunix-network/test-network"
 ./network.sh deployCC \
