@@ -42,19 +42,19 @@ export default function App() {
         Skip to content
       </a>
 
-      <aside className="sidebar sticky top-0 flex h-screen w-[248px] shrink-0 flex-col border-r border-line px-4 pb-6 pt-7">
+      <aside className="sidebar sticky top-0 flex h-screen w-[256px] shrink-0 flex-col border-r border-line bg-sidebar px-4 pb-6 pt-7">
         <div className="flex items-center gap-3 px-2">
-          <span className="brand-mark grid h-9 w-9 place-items-center rounded-[10px] text-[15px] font-bold text-white" aria-hidden="true">
+          <span className="brand-mark grid h-9 w-9 place-items-center rounded-xl text-[15px] font-bold text-white shadow-sm" aria-hidden="true">
             A
           </span>
           <div className="leading-tight">
-            <p className="text-[17px] font-semibold tracking-tight">Advait</p>
-            <p className="text-xs text-muted">PvP settlement layer</p>
+            <p className="text-[17px] font-bold tracking-tight text-fg">Advait</p>
+            <p className="text-xs font-medium text-muted">PvP settlement layer</p>
           </div>
         </div>
 
-        <p className="eyebrow mt-10 px-3">Views</p>
-        <nav aria-label="Main" className="mt-3 flex flex-col gap-1">
+        <p className="eyebrow mt-10 px-3 font-semibold text-muted/80">Views</p>
+        <nav aria-label="Main" className="mt-3 flex flex-col gap-1.5">
           {TABS.map((t) => {
             const active = tab === t.id
             return (
@@ -63,13 +63,15 @@ export default function App() {
                 onClick={() => setTab(t.id)}
                 aria-current={active ? 'page' : undefined}
                 className={cx(
-                  'relative flex h-11 items-center gap-3 rounded-xl px-3 text-left text-[15px] font-medium transition-all duration-150',
-                  active ? 'card text-fg' : 'text-muted hover:bg-surface/60 hover:text-fg',
+                  'relative flex h-11 items-center gap-3 rounded-xl px-3.5 text-left text-[15px] font-medium transition-all duration-150',
+                  active
+                    ? 'nav-active'
+                    : 'text-muted hover:bg-surface-2 hover:text-fg',
                 )}
               >
-                {active && <span className="absolute -left-4 top-2.5 h-6 w-[3px] rounded-r-full bg-accent" aria-hidden="true" />}
-                <span className={cx(active ? 'text-accent-fg' : 'text-muted')}>{t.icon}</span>
-                {t.label}
+                {active && <span className="absolute -left-4 top-2.5 h-6 w-[3.5px] rounded-r-full bg-accent" aria-hidden="true" />}
+                <span className={cx(active ? 'text-accent' : 'text-muted')}>{t.icon}</span>
+                <span className={active ? 'font-semibold text-fg' : undefined}>{t.label}</span>
               </button>
             )
           })}
@@ -83,18 +85,18 @@ export default function App() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 border-b border-line bg-bg/75 px-10 py-5 backdrop-blur-xl">
+        <header className="sticky top-0 z-20 border-b border-line bg-surface/95 px-10 py-5 backdrop-blur-xl shadow-[0_2px_10px_rgba(76,29,149,0.05)]">
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
             <div className="min-w-0 flex-1">
-              <p className="eyebrow">Advait · INR / USD</p>
-              <h1 className="mt-1 text-[26px] font-semibold leading-tight tracking-[-0.02em]">{current.title}</h1>
+              <p className="eyebrow !text-accent-fg">Advait · INR / USD</p>
+              <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-[-0.025em] text-fg">{current.title}</h1>
             </div>
             <HealthPill loading={health.loading} online={online} parties={health.data?.parties} />
             <button
               onClick={() => setDark((d) => !d)}
               aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
               title={dark ? 'Light theme' : 'Dark theme'}
-              className="card grid h-10 w-10 place-items-center !rounded-full text-muted transition-colors hover:text-fg"
+              className="card grid h-10 w-10 place-items-center !rounded-full text-muted transition-colors hover:text-fg hover:border-hairline-strong"
             >
               {dark ? <IconSun size={17} /> : <IconMoon size={17} />}
             </button>
