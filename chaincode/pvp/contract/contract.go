@@ -82,31 +82,47 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 	}
 	cfg := req.Config
 
-	// Banks: exactly BANKIN and BANKFX, distinct non-empty MSP IDs.
-	if len(cfg.Banks) != 2 || cfg.Banks[BankIN] == "" || cfg.Banks[BankFX] == "" {
-		return reject(ErrInvalidInput, "banks must map exactly %s and %s to MSP IDs", BankIN, BankFX)
+	// Banks: exactly all 4 banks (BANKIN, BANKFX, BANKUS, BANKSG), non-empty MSP IDs.
+	if len(cfg.Banks) != len(allBanks) {
+		return reject(ErrInvalidInput, "banks must map all %d participant banks (%s, %s, %s, %s) to MSP IDs", len(allBanks), BankIN, BankFX, BankUS, BankSG)
 	}
-	if cfg.Banks[BankIN] == cfg.Banks[BankFX] {
-		return reject(ErrInvalidInput, "%s and %s must be different MSPs", BankIN, BankFX)
+	for _, b := range allBanks {
+		if cfg.Banks[b] == "" {
+			return reject(ErrInvalidInput, "bank %s must map to a non-empty MSP ID", b)
+		}
 	}
 	for _, a := range cfg.AuditorMSPs {
 		if a == "" {
 			return reject(ErrInvalidInput, "auditor MSP IDs must be non-empty")
 		}
-		if a == cfg.Banks[BankIN] || a == cfg.Banks[BankFX] {
-			return reject(ErrInvalidInput, "auditor MSP %q must not be a bank MSP", a)
+		for _, b := range allBanks {
+			if a == cfg.Banks[b] {
+				return reject(ErrInvalidInput, "auditor MSP %q must not be a bank MSP", a)
+			}
 		}
 	}
 	if o := cfg.OracleMSP; o != "" {
-		if o == cfg.Banks[BankIN] || o == cfg.Banks[BankFX] || contains(cfg.AuditorMSPs, o) {
-			return reject(ErrInvalidInput, "oracle MSP %q must not be a bank or auditor MSP", o)
+		if contains(cfg.AuditorMSPs, o) {
+			return reject(ErrInvalidInput, "oracle MSP %q must not be an auditor MSP", o)
+		}
+		for _, b := range allBanks {
+			if o == cfg.Banks[b] {
+				return reject(ErrInvalidInput, "oracle MSP %q must not be a bank MSP", o)
+			}
 		}
 	}
 	msp, err := callerMSP(ctx)
 	if err != nil {
 		return err
 	}
-	if msp != cfg.Banks[BankIN] && msp != cfg.Banks[BankFX] {
+	isBankMSP := false
+	for _, b := range allBanks {
+		if msp == cfg.Banks[b] {
+			isBankMSP = true
+			break
+		}
+	}
+	if !isBankMSP {
 		return reject(ErrUnauthorized, "only a settlement bank may initialise the ledger (submitter %q)", msp)
 	}
 	if cfg.Pair != "USD/INR" {
@@ -123,9 +139,9 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 		return reject(ErrInvalidInput, "rateWindow must be 1..100, got %d", cfg.RateWindow)
 	}
 
-	// Opening balances: both banks, both currencies, non-negative integers.
-	if len(req.Balances) != 2 {
-		return reject(ErrInvalidInput, "balances must cover exactly %s and %s", BankIN, BankFX)
+	// Opening balances: all 4 banks, both currencies, non-negative integers.
+	if len(req.Balances) != len(allBanks) {
+		return reject(ErrInvalidInput, "balances must cover all %d banks", len(allBanks))
 	}
 	opening := Balances{}
 	supply := map[string]int64{}
@@ -340,10 +356,6 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 	if err != nil {
 		return err
 	}
-	bank, msp, err := callerBank(ctx, cfg)
-	if err != nil {
-		return err
-	}
 	var in Instruction
 	if err := decodeStrict("instruction", instructionJSON, &in); err != nil {
 		return err
@@ -351,17 +363,30 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 	if err := validID("tradeId", in.TradeID); err != nil {
 		return err
 	}
-	if !isBank(in.AsBank) {
-		return reject(ErrInvalidInput, "asBank must be %s or %s, got %q", BankIN, BankFX, in.AsBank)
+	msp, err := authorizeBankCaller(ctx, cfg, in.AsBank)
+	if err != nil {
+		return err
 	}
-	if in.AsBank != bank {
-		return reject(ErrForgedInstruction,
-			"submitter is %s (%s) but the instruction claims to come from %s; a bank cannot instruct for its counterparty",
-			msp, bank, in.AsBank)
+	bank := in.AsBank
+
+	// Backward compatibility defaulting for 2-bank instructions that omit inrDeliverer
+	if in.INRDeliverer == "" && (in.USDDeliverer == BankIN || in.USDDeliverer == BankFX) {
+		in.INRDeliverer = otherBank(in.USDDeliverer)
 	}
+
 	if !isBank(in.USDDeliverer) {
-		return reject(ErrInvalidInput, "usdDeliverer must be %s or %s, got %q", BankIN, BankFX, in.USDDeliverer)
+		return reject(ErrInvalidInput, "usdDeliverer must be a valid bank (%s, %s, %s, or %s), got %q", BankIN, BankFX, BankUS, BankSG, in.USDDeliverer)
 	}
+	if !isBank(in.INRDeliverer) {
+		return reject(ErrInvalidInput, "inrDeliverer must be a valid bank (%s, %s, %s, or %s), got %q", BankIN, BankFX, BankUS, BankSG, in.INRDeliverer)
+	}
+	if in.USDDeliverer == in.INRDeliverer {
+		return reject(ErrInvalidInput, "usdDeliverer %s and inrDeliverer %s must be different banks", in.USDDeliverer, in.INRDeliverer)
+	}
+	if bank != in.USDDeliverer && bank != in.INRDeliverer {
+		return reject(ErrInvalidInput, "asBank %s must be either usdDeliverer %s or inrDeliverer %s", bank, in.USDDeliverer, in.INRDeliverer)
+	}
+
 	usd, err := ParseAmount("usdAmount", in.USDAmount)
 	if err != nil {
 		return err
@@ -391,7 +416,7 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 	if trade == nil {
 		trade = &Trade{
 			TradeID: in.TradeID, Status: StatusPendingMatch,
-			USDDeliverer: in.USDDeliverer, INRDeliverer: otherBank(in.USDDeliverer),
+			USDDeliverer: in.USDDeliverer, INRDeliverer: in.INRDeliverer,
 			USDAmount: usd, INRAmount: inr, RateSeq: in.RateSeq, RateMicros: rate.RateMicros,
 			InstructedBy: []string{bank},
 		}
@@ -399,6 +424,9 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 		var diffs []string
 		if trade.USDDeliverer != in.USDDeliverer {
 			diffs = append(diffs, fmt.Sprintf("usdDeliverer %s vs %s", trade.USDDeliverer, in.USDDeliverer))
+		}
+		if trade.INRDeliverer != in.INRDeliverer {
+			diffs = append(diffs, fmt.Sprintf("inrDeliverer %s vs %s", trade.INRDeliverer, in.INRDeliverer))
 		}
 		if trade.USDAmount != usd {
 			diffs = append(diffs, fmt.Sprintf("usdAmount %d vs %d", trade.USDAmount, usd))
@@ -410,9 +438,13 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 			diffs = append(diffs, fmt.Sprintf("rateSeq %d vs %d", trade.RateSeq, in.RateSeq))
 		}
 		if len(diffs) > 0 {
+			counterparty := trade.USDDeliverer
+			if bank == trade.USDDeliverer {
+				counterparty = trade.INRDeliverer
+			}
 			return reject(ErrInstructionMismatch,
 				"%s's instruction for trade %s does not match %s's: %s",
-				bank, in.TradeID, otherBank(bank), strings.Join(diffs, "; "))
+				bank, in.TradeID, counterparty, strings.Join(diffs, "; "))
 		}
 		trade.InstructedBy = append(trade.InstructedBy, bank)
 		sort.Strings(trade.InstructedBy)
@@ -433,6 +465,56 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 	return appendLog(stub, "INSTRUCTED", msp, in.TradeID,
 		fmt.Sprintf("%s instructed: %s pays %d USD cents, %s pays %d INR paise at rate seq %d (%s); trade now %s",
 			bank, trade.USDDeliverer, usd, trade.INRDeliverer, inr, in.RateSeq, fmtRate(rate.RateMicros), trade.Status))
+}
+
+// WithdrawInstruction cancels an un-matched pending instruction submitted by `asBank`.
+// Caller MSP must be authorized to act as `asBank`.
+// The trade must be in StatusPendingMatch. If already matched or settled, it rejects.
+func (c *PvPContract) WithdrawInstruction(ctx contractapi.TransactionContextInterface, tradeID string, asBank string) error {
+	stub := ctx.GetStub()
+	cfg, err := loadConfig(stub)
+	if err != nil {
+		return err
+	}
+	if err := validID("tradeId", tradeID); err != nil {
+		return err
+	}
+	msp, err := authorizeBankCaller(ctx, cfg, asBank)
+	if err != nil {
+		return err
+	}
+	trade, tradeKey, err := loadTrade(stub, tradeID)
+	if err != nil {
+		return err
+	}
+	if trade == nil {
+		return reject(ErrTradeNotFound, "no trade %s found", tradeID)
+	}
+	switch trade.Status {
+	case StatusSettled:
+		return reject(ErrAlreadySettled, "trade %s was already settled; instruction cannot be withdrawn", tradeID)
+	case StatusMatched:
+		return reject(ErrAlreadyMatched, "cannot withdraw instruction for matched trade %s; matching terms were already accepted by both banks", tradeID)
+	case StatusPendingMatch:
+	default:
+		return reject(ErrInternal, "trade %s has unknown status %q", tradeID, trade.Status)
+	}
+	if !contains(trade.InstructedBy, asBank) {
+		return reject(ErrInvalidInput, "bank %s has not instructed trade %s", asBank, tradeID)
+	}
+
+	ik, err := key(stub, keyInstr, tradeID, asBank)
+	if err != nil {
+		return err
+	}
+	if err := stub.DelState(ik); err != nil {
+		return reject(ErrInternal, "delete instruction %s/%s: %v", tradeID, asBank, err)
+	}
+	if err := stub.DelState(tradeKey); err != nil {
+		return reject(ErrInternal, "delete trade %s: %v", tradeID, err)
+	}
+	return appendLog(stub, "INSTRUCTION_WITHDRAWN", msp, tradeID,
+		fmt.Sprintf("%s withdrew its pending instruction for trade %s", asBank, tradeID))
 }
 
 // SettleTrade atomically settles both legs of one matched trade:

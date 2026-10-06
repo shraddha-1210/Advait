@@ -7,6 +7,8 @@ import "github.com/advait/pvp-settlement/chaincode/attest"
 const (
 	BankIN = "BANKIN"
 	BankFX = "BANKFX"
+	BankUS = "BANKUS"
+	BankSG = "BANKSG"
 )
 
 // Currencies held on-ledger (simulated tokenized cash).
@@ -16,7 +18,7 @@ const (
 )
 
 var (
-	allBanks      = []string{BankIN, BankFX} // fixed order: determinism
+	allBanks      = []string{BankIN, BankFX, BankUS, BankSG} // fixed order: determinism
 	allCurrencies = []string{INR, USD}
 )
 
@@ -27,13 +29,16 @@ func otherBank(b string) string {
 	return BankIN
 }
 
-func isBank(b string) bool { return b == BankIN || b == BankFX }
+func isBank(b string) bool {
+	return b == BankIN || b == BankFX || b == BankUS || b == BankSG
+}
 
 // Trade statuses.
 const (
 	StatusPendingMatch = "PENDING_MATCH" // one bank has instructed
 	StatusMatched      = "MATCHED"       // both banks instructed identical terms
 	StatusSettled      = "SETTLED"
+	StatusWithdrawn    = "WITHDRAWN"
 )
 
 // State key prefixes (composite-key object types).
@@ -85,8 +90,9 @@ type RateRecord struct {
 // Instruction is one bank's commitment to a trade's exact terms.
 type Instruction struct {
 	TradeID      string `json:"tradeId"`
-	AsBank       string `json:"asBank"`       // must match the submitter's MSP
-	USDDeliverer string `json:"usdDeliverer"` // bank that pays USD; the other pays INR
+	AsBank       string `json:"asBank"`       // logical bank participant instructing; must match submitter MSP authorization
+	USDDeliverer string `json:"usdDeliverer"` // bank that pays USD
+	INRDeliverer string `json:"inrDeliverer"` // bank that pays INR
 	USDAmount    string `json:"usdAmount"`    // cents
 	INRAmount    string `json:"inrAmount"`    // paise
 	RateSeq      int64  `json:"rateSeq"`      // attestation the terms were priced at
@@ -135,4 +141,20 @@ type ConservationReport struct {
 	Sum      int64  `json:"sum"`    // real sum over every balance on the ledger
 	Holds    bool   `json:"holds"`
 	Accounts int    `json:"accounts"` // number of balances summed
+}
+
+// LiquidityRequest is the argument for PreviewLiquidity and LiquidityResolve.
+type LiquidityRequest struct {
+	BatchID  string   `json:"batchId"`
+	TradeIDs []string `json:"tradeIds"`
+}
+
+// LiquidityPlan is the output of resolving gridlock and netting candidates.
+type LiquidityPlan struct {
+	BatchID         string   `json:"batchId"`
+	InputTradeIDs   []string `json:"inputTradeIds"`   // candidate trade IDs passed in
+	SettledTradeIDs []string `json:"settledTradeIds"` // trade IDs that can be resolved and settled
+	DroppedTradeIDs []string `json:"droppedTradeIds"` // trade IDs dropped due to gridlock
+	Cycles          []Cycle  `json:"cycles,omitempty"`
+	NetPlan         NetPlan  `json:"netPlan"`
 }

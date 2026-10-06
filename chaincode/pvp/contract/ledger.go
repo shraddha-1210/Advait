@@ -95,7 +95,7 @@ func callerMSP(ctx contractapi.TransactionContextInterface) (string, error) {
 	return msp, nil
 }
 
-// callerBank maps the submitter to a bank role, or rejects.
+// callerBank checks if the submitter MSP is mapped to any bank role, returning the submitter MSP ID.
 func callerBank(ctx contractapi.TransactionContextInterface, cfg *Config) (string, string, error) {
 	msp, err := callerMSP(ctx)
 	if err != nil {
@@ -107,6 +107,25 @@ func callerBank(ctx contractapi.TransactionContextInterface, cfg *Config) (strin
 		}
 	}
 	return "", msp, reject(ErrUnauthorized, "submitter MSP %q is not a settlement bank; only banks may move value", msp)
+}
+
+// authorizeBankCaller enforces explicit proxy authorization: the authenticated
+// Fabric caller (MSP) must be a settlement bank and must match the configured proxy MSP for the logical ledger participant `asBank`.
+func authorizeBankCaller(ctx contractapi.TransactionContextInterface, cfg *Config, asBank string) (string, error) {
+	if !isBank(asBank) {
+		return "", reject(ErrInvalidInput, "asBank must be a valid bank (%s, %s, %s, or %s), got %q", BankIN, BankFX, BankUS, BankSG, asBank)
+	}
+	_, msp, err := callerBank(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	authorizedMSP, ok := cfg.Banks[asBank]
+	if !ok || authorizedMSP == "" || authorizedMSP != msp {
+		return msp, reject(ErrForgedInstruction,
+			"submitter %s is not authorized to act as bank %s (authorized MSP: %s); a bank cannot instruct for another bank",
+			msp, asBank, authorizedMSP)
+	}
+	return msp, nil
 }
 
 // unpagedScanCap is the most rows a plain (unpaginated) range scan returns on
