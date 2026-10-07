@@ -8,6 +8,7 @@ import { TestTradeToggle } from '../components/TestTradeToggle'
 import { Button, Card, Chip, Empty, ErrorBox, Skeleton } from '../components/ui'
 import { cx } from '../lib/cx'
 import { bankLabel, LEDGER_BANKS, money, shortHash, timeOf } from '../lib/format'
+import { netTotal, reductionPct } from '../lib/net'
 import { plainReason } from '../lib/reasons'
 import { demoFirst, isTestTrade } from '../lib/trades'
 import { useApi } from '../lib/useApi'
@@ -24,12 +25,6 @@ type Outcome =
 function sameBalances(a?: Balances, b?: Balances) {
   if (!a || !b) return false
   return LEDGER_BANKS.every((bk) => CCYS.every((c) => (a[bk]?.[c] ?? 0) === (b[bk]?.[c] ?? 0)))
-}
-
-/** Share of the gross that netting removes, as a whole percent (integer maths). */
-function reductionPct(gross: number, net: number): number {
-  if (gross <= 0) return 0
-  return Math.round(((gross - net) * 100) / gross)
 }
 
 export function Netting({ online }: { online: boolean }) {
@@ -339,13 +334,16 @@ function NetPanel({ plan, loading }: { plan?: { net: NetLeg[] }; loading: boolea
       <p className="eyebrow !text-accent-fg">Net: what actually moves</p>
       <div className="mt-6 space-y-4">
         {CCYS.map((c) => {
-          const n = plan?.net.find((x) => x.currency === c)
+          const legs = plan?.net.filter((x) => x.currency === c && x.amount > 0) ?? []
+          const total = plan ? netTotal(plan.net, c) : 0
           return (
             <div key={c} className="min-h-[40px]">
-              {n && !loading ? (
+              {plan && !loading ? (
                 <div>
-                  <Money minor={n.amount} ccy={c} size="lg" />
-                  <p className="mt-1 text-xs text-muted">{n.amount === 0 ? 'Nets to zero: nothing moves' : `${bankLabel(n.from!)} pays ${bankLabel(n.to!)}`}</p>
+                  <Money minor={total} ccy={c} size="lg" />
+                  <p className="mt-1 text-xs text-muted">
+                    {legs.length === 0 ? 'Nets to zero: nothing moves' : legs.map((n) => `${bankLabel(n.from!)} pays ${bankLabel(n.to!)} ${money(n.amount, c)}`).join(' · ')}
+                  </p>
                 </div>
               ) : (
                 <Skeleton className="h-9 w-[70%]" />
@@ -354,13 +352,13 @@ function NetPanel({ plan, loading }: { plan?: { net: NetLeg[] }; loading: boolea
           )
         })}
       </div>
-      <p className="mt-6 border-t border-line pt-4 text-xs text-muted">One payment per currency, in one transaction with every trade.</p>
+      <p className="mt-6 border-t border-line pt-4 text-xs text-muted">The net payments, in one transaction with every trade.</p>
     </div>
   )
 }
 
 function Reduction({ plan }: { plan: { gross: Record<string, number>; net: NetLeg[] } }) {
-  const saved = CCYS.some((c) => (plan.gross[c] ?? 0) > (plan.net.find((x) => x.currency === c)?.amount ?? 0))
+  const saved = CCYS.some((c) => (plan.gross[c] ?? 0) > netTotal(plan.net, c))
   if (!saved) {
     return (
       <p className="well mt-6 px-5 py-4 text-sm text-fg-2">
@@ -374,7 +372,7 @@ function Reduction({ plan }: { plan: { gross: Record<string, number>; net: NetLe
     <div className="mt-6 grid gap-4 sm:grid-cols-2">
       {CCYS.map((c) => {
         const gross = plan.gross[c] ?? 0
-        const net = plan.net.find((x) => x.currency === c)?.amount ?? 0
+        const net = netTotal(plan.net, c)
         const pct = reductionPct(gross, net)
         return (
           <div key={c} className="well flex items-baseline justify-between gap-4 px-5 py-4">

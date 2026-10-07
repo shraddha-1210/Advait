@@ -1,7 +1,11 @@
 // One-line plain-English reading of each refusal code. The Security screen shows it next to the real
 // code and message; Settlement and Netting lead with it and keep the code under "Technical details".
 export const REASON: Record<string, string> = {
-  ERR_BATCH: 'The batch is not valid: it needs at least two different matched trades.',
+  ERR_BATCH: 'The batch is not valid: a trade is listed twice, or there are too few or too many trades.',
+  ERR_GRIDLOCK: 'No set of these trades can be funded together, so nothing settles and nothing moves.',
+  ERR_SINGLE_ORG_TRADE: 'Both sides of the trade are held by one bank org. Every trade must span both orgs.',
+  ERR_INVALID_INPUT: 'The request is not valid. Clients send trade IDs only; the ledger computes every figure.',
+  ERR_UNAUTHORIZED: 'Only a settlement bank may move value.',
   ERR_TRADE_NOT_FOUND: 'A trade in the request does not exist on the ledger.',
   ERR_INVARIANT_VIOLATION: 'The result would create or destroy value, so the ledger refused it.',
 
