@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/advait/pvp-settlement/gateway/internal/ledger"
+	"github.com/advait/pvp-settlement/gateway/internal/seed"
 )
 
 // Liquidity engine endpoints. The gateway only passes trade IDs to the
@@ -143,6 +144,23 @@ func (s *Server) liquidityResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Preview = rawJSON(out)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// liquidityScenarios lists the seed scenarios (titles, notes, trade IDs) for
+// the frontend. It returns no figures: the frontend previews each scenario
+// through the chaincode like any other selection.
+func (s *Server) liquidityScenarios(w http.ResponseWriter, r *http.Request) {
+	path, err := seed.Find()
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	sd, err := seed.Load(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scenarios": sd.Scenarios})
 }
 
 // liquiditySettle submits LiquiditySettle for the listed trades. The

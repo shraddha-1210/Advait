@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/liquidity/preview", s.liquidityPreview)
 	mux.HandleFunc("POST /api/liquidity/resolve", s.liquidityResolve)
 	mux.HandleFunc("POST /api/liquidity/settle", s.liquiditySettle)
+	mux.HandleFunc("GET /api/liquidity/scenarios", s.liquidityScenarios)
 	mux.HandleFunc("GET /api/attacks", s.attackCatalogue)
 	mux.HandleFunc("POST /api/attacks/{name}", s.runAttack)
 	return cors(logging(mux))

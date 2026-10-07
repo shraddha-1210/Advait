@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/advait/pvp-settlement/gateway/internal/ledger"
+	"github.com/advait/pvp-settlement/gateway/internal/seed"
 )
 
 func post(h http.HandlerFunc, body string) *httptest.ResponseRecorder {
@@ -129,5 +131,27 @@ func TestInstructionJSONInrDeliverer(t *testing.T) {
 	_ = json.Unmarshal([]byte(instructionJSON(InstructionBody{As: "BANKIN", AsBank: "BANKUS", TradeID: "T1", USDDeliverer: "BANKUS", INRDeliverer: "BANKSG"})), &m)
 	if m["inrDeliverer"] != "BANKSG" || m["asBank"] != "BANKUS" {
 		t.Fatalf("four-bank instruction: %v", m)
+	}
+}
+
+func TestLiquidityScenariosServesSeedWithoutFigures(t *testing.T) {
+	t.Setenv("LIQUIDITY_SEED", filepath.Join("..", "..", "..", seed.RelPath))
+	w := httptest.NewRecorder()
+	(&Server{}).liquidityScenarios(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	var v struct {
+		Scenarios []map[string]json.RawMessage `json:"scenarios"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || len(v.Scenarios) == 0 {
+		t.Fatalf("decode: %v %s", err, w.Body)
+	}
+	for _, sc := range v.Scenarios {
+		for k := range sc {
+			if k != "id" && k != "title" && k != "note" && k != "tradeIds" {
+				t.Fatalf("scenario carries field %q; scenarios must not carry figures", k)
+			}
+		}
 	}
 }

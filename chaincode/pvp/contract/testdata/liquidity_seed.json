@@ -1,0 +1,179 @@
+{
+  "description": "Deterministic liquidity-engine demo data. Trade definitions only: the INR leg of each trade is quoted by the chaincode from the attested rate when the trade is instructed, and every net figure, dropped trade, cycle and saving is computed by the chaincode from ledger state. BANKUS and BANKSG are simulated ledger-level participants within the existing two-org network.",
+  "openingBalances": {
+    "BANKIN": {
+      "INR": "50000000000",
+      "USD": "0"
+    },
+    "BANKFX": {
+      "INR": "0",
+      "USD": "500000000"
+    },
+    "BANKUS": {
+      "INR": "0",
+      "USD": "100000000"
+    },
+    "BANKSG": {
+      "INR": "25000000000",
+      "USD": "0"
+    }
+  },
+  "trades": [
+    {
+      "tradeId": "LQ01",
+      "usdDeliverer": "BANKIN",
+      "inrDeliverer": "BANKFX",
+      "usdAmount": "40000000"
+    },
+    {
+      "tradeId": "LQ02",
+      "usdDeliverer": "BANKFX",
+      "inrDeliverer": "BANKUS",
+      "usdAmount": "40000000"
+    },
+    {
+      "tradeId": "LQ03",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "40000000"
+    },
+    {
+      "tradeId": "LQ04",
+      "usdDeliverer": "BANKSG",
+      "inrDeliverer": "BANKIN",
+      "usdAmount": "40000000"
+    },
+    {
+      "tradeId": "LQ05",
+      "usdDeliverer": "BANKIN",
+      "inrDeliverer": "BANKFX",
+      "usdAmount": "20000000"
+    },
+    {
+      "tradeId": "LQ06",
+      "usdDeliverer": "BANKFX",
+      "inrDeliverer": "BANKUS",
+      "usdAmount": "30000000"
+    },
+    {
+      "tradeId": "LQ07",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "30000000"
+    },
+    {
+      "tradeId": "LQ08",
+      "usdDeliverer": "BANKSG",
+      "inrDeliverer": "BANKIN",
+      "usdAmount": "30000000"
+    },
+    {
+      "tradeId": "LQ09",
+      "usdDeliverer": "BANKFX",
+      "inrDeliverer": "BANKIN",
+      "usdAmount": "120000000"
+    },
+    {
+      "tradeId": "LQ10",
+      "usdDeliverer": "BANKIN",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "70000000"
+    },
+    {
+      "tradeId": "LQ11",
+      "usdDeliverer": "BANKFX",
+      "inrDeliverer": "BANKIN",
+      "usdAmount": "50000000"
+    },
+    {
+      "tradeId": "LQ12",
+      "usdDeliverer": "BANKIN",
+      "inrDeliverer": "BANKFX",
+      "usdAmount": "20000000"
+    },
+    {
+      "tradeId": "LQ13",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "90000000"
+    },
+    {
+      "tradeId": "LQ14",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "60000000"
+    },
+    {
+      "tradeId": "LQ15",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKSG",
+      "usdAmount": "30000000"
+    },
+    {
+      "tradeId": "LQ16",
+      "usdDeliverer": "BANKUS",
+      "inrDeliverer": "BANKFX",
+      "usdAmount": "150000000"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "four-bank-cycle",
+      "title": "Four-bank cycle that nets to zero",
+      "note": "USD runs BankIN to BankFX to BankUS to BankSG and back to BankIN, 400,000.00 USD on every leg. No trade can settle gross on its own: each payer lacks the currency it owes. Netted, nothing needs to move.",
+      "tradeIds": [
+        "LQ01",
+        "LQ02",
+        "LQ03",
+        "LQ04"
+      ]
+    },
+    {
+      "id": "four-bank-cycle-residual",
+      "title": "Four-bank cycle with a residual",
+      "note": "The same loop, but one leg is smaller. The cycle offsets the common amount and only the residual moves.",
+      "tradeIds": [
+        "LQ05",
+        "LQ06",
+        "LQ07",
+        "LQ08"
+      ]
+    },
+    {
+      "id": "three-bank-chain",
+      "title": "Three-bank netting chain",
+      "note": "BankFX pays BankIN, and BankIN pays BankSG out of what it receives. LQ10 cannot settle gross: BankIN holds no USD. A three-bank cycle is not possible here, because every trade must span the two bank orgs.",
+      "tradeIds": [
+        "LQ09",
+        "LQ10"
+      ]
+    },
+    {
+      "id": "bilateral",
+      "title": "Bilateral netting, BankIN and BankFX",
+      "note": "Trades in both directions between the two bank orgs net to one movement per currency.",
+      "tradeIds": [
+        "LQ11",
+        "LQ12"
+      ]
+    },
+    {
+      "id": "gridlock-resolved",
+      "title": "Gridlock resolved by dropping one trade",
+      "note": "BankUS owes more USD than it holds. The resolver drops the smallest trade that covers the shortfall and settles the rest.",
+      "tradeIds": [
+        "LQ13",
+        "LQ14",
+        "LQ15"
+      ]
+    },
+    {
+      "id": "gridlock-total",
+      "title": "Total gridlock: nothing settles",
+      "note": "BankUS owes more USD than it holds and BankFX holds no INR. No subset can be funded, so the batch is refused and nothing moves.",
+      "tradeIds": [
+        "LQ16"
+      ]
+    }
+  ]
+}
