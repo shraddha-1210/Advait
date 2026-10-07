@@ -87,7 +87,7 @@ func TestGate1_SingleOrgCannotMatchOrSettle(t *testing.T) {
 				t.Fatalf("trade %s should not exist, got %v", id, err)
 			}
 			f.mustReject(ErrTradeNotFound, func() txResult { return f.settle(c.msp, id) })
-			f.mustReject(ErrTradeNotFound, func() txResult { return f.liquidityResolve(c.msp, "B-"+id, id) })
+			f.mustReject(ErrTradeNotFound, func() txResult { return f.liquiditySettle(c.msp, "B-"+id, id) })
 			if after := f.balances().Balances; !equalBalances(before, after) {
 				t.Fatalf("balances moved: before %v after %v", before, after)
 			}
@@ -134,7 +134,7 @@ func TestGate1_SettleTimeRecheck(t *testing.T) {
 
 	f.mustReject(ErrSingleOrgTrade, func() txResult { return f.settle(mspIN, "BAD1") })
 	f.mustReject(ErrSingleOrgTrade, func() txResult { return f.netSettle(mspIN, "B-NET", "BAD1", "OK1") })
-	f.mustReject(ErrSingleOrgTrade, func() txResult { return f.liquidityResolve(mspIN, "B-LIQ", "BAD1", "OK1") })
+	f.mustReject(ErrSingleOrgTrade, func() txResult { return f.liquiditySettle(mspIN, "B-LIQ", "BAD1", "OK1") })
 	if _, err := f.previewNet("B-NET", "BAD1", "OK1"); CodeOf(err) != ErrSingleOrgTrade {
 		t.Fatalf("PreviewNet: want %s, got %v", ErrSingleOrgTrade, err)
 	}

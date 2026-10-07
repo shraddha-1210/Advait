@@ -65,7 +65,17 @@ mutate "single-org trade accepted (helper disabled)"  ledger.go   's/\tif u == i
 mutate "single-org trade accepted at instruction"     contract.go 's/requireTwoOrgs\(cfg, in\.TradeID, in\.USDDeliverer, in\.INRDeliverer\)/error(nil)/'
 mutate "single-org trade not re-checked in SettleTrade" contract.go 's/requireTwoOrgs\(cfg, tradeID, trade\.USDDeliverer, trade\.INRDeliverer\)/error(nil)/'
 mutate "single-org trade not re-checked in NetSettle"  netting.go  's/requireTwoOrgs\(cfg, id, t\.USDDeliverer, t\.INRDeliverer\)/error(nil)/'
-mutate "single-org trade not re-checked in liquidity"  netting.go  's/requireTwoOrgs\(cfg, id, t\.USDDeliverer, t\.INRDeliverer\)(?=(?:(?!requireTwoOrgs).)*?keysMap\[id\] = k)/error(nil)/s'
+mutate "single-org trade not re-checked in liquidity"  liquidity.go 's/requireTwoOrgs\(cfg, id, t\.USDDeliverer, t\.INRDeliverer\)/error(nil)/'
+mutate "liquidity removes largest covering trade"      liquidity.go 's/better = amt < bestAmt/better = amt > bestAmt/'
+mutate "liquidity prefers a trade that does not cover" liquidity.go 's/better = covers\n/better = !covers\n/'
+mutate "liquidity resolves first shortfall, not largest" liquidity.go 's/if largerShortfall\(s, worst, net\.Gross\) \{/if false {/'
+mutate "liquidity compares shortfalls in raw minor units" liquidity.go 's/v := big\.NewInt\(s\.amount\)\n/v := big.NewInt(s.amount)\n\treturn v\n/'
+mutate "liquidity shortfall tie goes to later bank"   liquidity.go 's/\(shortfallWeight\(b, gross\)\) > 0/(shortfallWeight(b, gross)) >= 0/'
+mutate "liquidity tie between trades goes to higher ID" liquidity.go 's/return current\[i\]\.TradeID < current\[j\]\.TradeID/return current[i].TradeID > current[j].TradeID/'
+mutate "liquidity marks dropped trades settled"       liquidity.go 's/if !settle\[t\.TradeID\] \{/if false {/'
+mutate "liquidity invariant check skipped"            liquidity.go 's/if err := assertConservation\(stub, post\); err != nil \{\n\t\treturn err\n\t\}/_ = assertConservation/'
+mutate "liquidity batch ID replay allowed"            liquidity.go 's/\} else if found \{/} else if false \&\& found {/'
+mutate "liquidity gridlock settles anyway (no shortfall check)" liquidity.go 's/if len\(short\) == 0 \{/if true {/'
 echo "killed: $pass   survived/not-applied: $fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]

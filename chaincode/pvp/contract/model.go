@@ -141,19 +141,3 @@ type ConservationReport struct {
 	Holds    bool   `json:"holds"`
 	Accounts int    `json:"accounts"` // number of balances summed
 }
-
-// LiquidityRequest is the argument for PreviewLiquidity and LiquidityResolve.
-type LiquidityRequest struct {
-	BatchID  string   `json:"batchId"`
-	TradeIDs []string `json:"tradeIds"`
-}
-
-// LiquidityPlan is the output of resolving gridlock and netting candidates.
-type LiquidityPlan struct {
-	BatchID         string   `json:"batchId"`
-	InputTradeIDs   []string `json:"inputTradeIds"`   // candidate trade IDs passed in
-	SettledTradeIDs []string `json:"settledTradeIds"` // trade IDs that can be resolved and settled
-	DroppedTradeIDs []string `json:"droppedTradeIds"` // trade IDs dropped due to gridlock
-	Cycles          []Cycle  `json:"cycles,omitempty"`
-	NetPlan         NetPlan  `json:"netPlan"`
-}

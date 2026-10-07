@@ -7,9 +7,9 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-func (f *fixture) liquidityResolve(msp, batchID string, ids ...string) txResult {
+func (f *fixture) liquiditySettle(msp, batchID string, ids ...string) txResult {
 	req := mustJSON(f.t, LiquidityRequest{BatchID: batchID, TradeIDs: ids})
-	return f.l.invoke(msp, func(ctx contractapi.TransactionContextInterface) error { return f.cc.LiquidityResolve(ctx, req) })
+	return f.l.invoke(msp, func(ctx contractapi.TransactionContextInterface) error { return f.cc.LiquiditySettle(ctx, req) })
 }
 
 type previewLiquidityView struct {
@@ -56,7 +56,7 @@ func TestLiquidity_ComputeMultiNet_IgnoresClientTotals(t *testing.T) {
 		t.Fatalf("Gross USD = %d, want 1500000", got)
 	}
 
-	res := f.liquidityResolve(mspIN, "B_SAFE", "T1", "T2")
+	res := f.liquiditySettle(mspIN, "B_SAFE", "T1", "T2")
 	f.mustOK(res)
 
 	if f.tradeRecord("T1").Status != StatusSettled || f.tradeRecord("T2").Status != StatusSettled {
@@ -65,9 +65,15 @@ func TestLiquidity_ComputeMultiNet_IgnoresClientTotals(t *testing.T) {
 	f.mustInvariantHolds()
 }
 
-// TestLiquidity_GridlockResolution_RemovesLargestOutgoingTrade verifies deterministic
-// gridlock resolution: when a bank cannot fund, its largest outgoing trade is dropped.
-func TestLiquidity_GridlockResolution_RemovesLargestOutgoingTrade(t *testing.T) {
+// TestLiquidity_GridlockResolution_RemovesSmallestSufficientTrade verifies the
+// removal rule on BankFX's USD shortfall.
+//
+// CORRECTION (Stage 2): this test used to assert that the LARGEST trade, T_BIG,
+// is dropped. That rule settled only 1.5m USD of the 3.0m USD batch. The rule
+// now removes the smallest trade that alone covers the shortfall: BankFX is
+// 1.0m USD short, T_MED (1.0m) covers it, so T_MED is dropped and T_BIG +
+// T_SMALL (2.0m USD) settle, using all of BankFX's 2.0m USD.
+func TestLiquidity_GridlockResolution_RemovesSmallestSufficientTrade(t *testing.T) {
 	f := newFixtureWithRate(t)
 
 	// BankFX holds 2,000,000 USD (openUSD_FX)
@@ -85,23 +91,28 @@ func TestLiquidity_GridlockResolution_RemovesLargestOutgoingTrade(t *testing.T) 
 		t.Fatalf("PreviewLiquidity error: %v", err)
 	}
 
-	// Largest trade T_BIG (1.5m USD) should be dropped to resolve gridlock.
-	// Remaining: T_MED (1.0m USD) + T_SMALL (0.5m USD) = 1.5m USD <= 2.0m USD available.
-	if len(pv.Plan.DroppedTradeIDs) != 1 || pv.Plan.DroppedTradeIDs[0] != "T_BIG" {
-		t.Fatalf("Dropped trade = %v, want [T_BIG]", pv.Plan.DroppedTradeIDs)
+	if len(pv.Plan.DroppedTradeIDs) != 1 || pv.Plan.DroppedTradeIDs[0] != "T_MED" {
+		t.Fatalf("Dropped trade = %v, want [T_MED]", pv.Plan.DroppedTradeIDs)
 	}
-	if len(pv.Plan.SettledTradeIDs) != 2 {
-		t.Fatalf("Settled trades count = %d, want 2", len(pv.Plan.SettledTradeIDs))
+	if got := pv.Plan.SettledTradeIDs; len(got) != 2 || got[0] != "T_BIG" || got[1] != "T_SMALL" {
+		t.Fatalf("Settled trades = %v, want [T_BIG T_SMALL]", got)
+	}
+	want := Removal{Step: 1, TradeID: "T_MED", Bank: BankFX, Currency: USD, Shortfall: 1_000_000_00, Amount: 1_000_000_00}
+	if len(pv.Plan.Removals) != 1 || pv.Plan.Removals[0] != want {
+		t.Fatalf("Removals = %+v, want [%+v]", pv.Plan.Removals, want)
 	}
 
-	res := f.liquidityResolve(mspIN, "B_GRID", "T_BIG", "T_MED", "T_SMALL")
+	res := f.liquiditySettle(mspIN, "B_GRID", "T_BIG", "T_MED", "T_SMALL")
 	f.mustOK(res)
 
-	if f.tradeRecord("T_BIG").Status != StatusMatched {
-		t.Fatalf("T_BIG should remain MATCHED, got %s", f.tradeRecord("T_BIG").Status)
+	if f.tradeRecord("T_MED").Status != StatusMatched {
+		t.Fatalf("T_MED should remain MATCHED, got %s", f.tradeRecord("T_MED").Status)
 	}
-	if f.tradeRecord("T_MED").Status != StatusSettled || f.tradeRecord("T_SMALL").Status != StatusSettled {
-		t.Fatalf("T_MED and T_SMALL should be SETTLED")
+	if f.tradeRecord("T_BIG").Status != StatusSettled || f.tradeRecord("T_SMALL").Status != StatusSettled {
+		t.Fatalf("T_BIG and T_SMALL should be SETTLED")
+	}
+	if got := f.balances().Balances[BankFX][USD]; got != 0 {
+		t.Fatalf("BankFX USD = %d, want 0 (all 2.0m USD delivered)", got)
 	}
 	f.mustInvariantHolds()
 }
@@ -134,7 +145,7 @@ func TestLiquidity_AtomicSettlement(t *testing.T) {
 	f.matched("T1", BankFX, 100_00, 1)
 	f.matched("T2", BankFX, 200_00, 1)
 
-	res := f.liquidityResolve(mspIN, "B_ATOMIC", "T1", "T2")
+	res := f.liquiditySettle(mspIN, "B_ATOMIC", "T1", "T2")
 	f.mustOK(res)
 
 	for _, id := range []string{"T1", "T2"} {
@@ -152,7 +163,7 @@ func TestLiquidity_DuplicateTradesInRequest(t *testing.T) {
 	f.matched("T1", BankFX, 100_00, 1)
 
 	f.mustReject(ErrBatch, func() txResult {
-		return f.liquidityResolve(mspIN, "B_DUP", "T1", "T1")
+		return f.liquiditySettle(mspIN, "B_DUP", "T1", "T1")
 	})
 }
 
