@@ -52,6 +52,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/trades/{id}/settle", s.settle)
 	mux.HandleFunc("POST /api/net-preview", s.netPreview)
 	mux.HandleFunc("POST /api/net-settle", s.netSettle)
+	mux.HandleFunc("POST /api/liquidity/preview", s.liquidityPreview)
+	mux.HandleFunc("POST /api/liquidity/resolve", s.liquidityResolve)
+	mux.HandleFunc("POST /api/liquidity/settle", s.liquiditySettle)
 	mux.HandleFunc("GET /api/attacks", s.attackCatalogue)
 	mux.HandleFunc("POST /api/attacks/{name}", s.runAttack)
 	return cors(logging(mux))
@@ -331,8 +334,9 @@ func (s *Server) publishRate(w http.ResponseWriter, r *http.Request) {
 type InstructionBody struct {
 	As           string `json:"as"`
 	TradeID      string `json:"tradeId"`
-	AsBank       string `json:"asBank,omitempty"` // defaults to As; set differently only by attacks
+	AsBank       string `json:"asBank,omitempty"` // defaults to As; see custodies
 	USDDeliverer string `json:"usdDeliverer"`
+	INRDeliverer string `json:"inrDeliverer,omitempty"` // omitted: the other of BANKIN/BANKFX
 	USDAmount    string `json:"usdAmount"`
 	INRAmount    string `json:"inrAmount"`
 	RateSeq      int64  `json:"rateSeq"`
@@ -343,11 +347,31 @@ func instructionJSON(b InstructionBody) string {
 	if asBank == "" {
 		asBank = strings.ToUpper(b.As)
 	}
-	raw, _ := json.Marshal(map[string]any{
+	m := map[string]any{
 		"tradeId": b.TradeID, "asBank": asBank, "usdDeliverer": b.USDDeliverer,
 		"usdAmount": b.USDAmount, "inrAmount": b.INRAmount, "rateSeq": b.RateSeq,
-	})
+	}
+	if b.INRDeliverer != "" {
+		m["inrDeliverer"] = b.INRDeliverer
+	}
+	raw, _ := json.Marshal(m)
 	return string(raw)
+}
+
+// custodies reports whether org party p may instruct as ledger bank b: its
+// own bank, or the simulated ledger-level participant it custodies (BankIN's
+// org custodies BANKUS, BankFX's org custodies BANKSG). The chaincode
+// enforces the same mapping from the configuration pinned at InitLedger.
+func custodies(p ledger.Party, b string) bool {
+	switch strings.ToUpper(b) {
+	case string(p):
+		return true
+	case "BANKUS":
+		return p == ledger.BankIN
+	case "BANKSG":
+		return p == ledger.BankFX
+	}
+	return false
 }
 
 func (s *Server) instruct(w http.ResponseWriter, r *http.Request) {
@@ -361,7 +385,13 @@ func (s *Server) instruct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	body.AsBank = "" // the normal endpoint always instructs as the submitter
+	// The normal endpoint instructs as the submitter's own bank or a
+	// simulated bank it custodies, never as another org's bank.
+	if body.AsBank != "" && !custodies(p, body.AsBank) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("%s cannot instruct as %s", p, body.AsBank))
+		return
+	}
+	body.AsBank = strings.ToUpper(body.AsBank)
 	res, err := s.submitWithSnapshots(p, "SubmitInstruction", []string{instructionJSON(body)}, ledger.SubmitOptions{}, "",
 		fmt.Sprintf("%s instructs trade %s", p, body.TradeID))
 	if err != nil {

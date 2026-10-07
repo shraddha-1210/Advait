@@ -185,7 +185,7 @@ func balancesOn(t *testing.T, c *ledger.Client, p ledger.Party) peerView {
 func assertLedgerSane(t *testing.T, c *ledger.Client) peerView {
 	t.Helper()
 	in, fx := balancesOn(t, c, ledger.BankIN), balancesOn(t, c, ledger.BankFX)
-	for _, bank := range []string{"BANKIN", "BANKFX"} {
+	for _, bank := range ledgerBanks {
 		for _, ccy := range []string{"INR", "USD"} {
 			if in.Balances[bank][ccy] != fx.Balances[bank][ccy] {
 				t.Fatalf("peers disagree on %s/%s: BankIN peer %d, BankFX peer %d",
@@ -220,8 +220,13 @@ func tradeStatusOn(t *testing.T, c *ledger.Client, p ledger.Party, id string) (s
 	return v.Trade.Status, v.Trade.SettledTx
 }
 
+// ledgerBanks is every bank account on the ledger. BANKUS and BANKSG are
+// simulated ledger-level participants within the existing two-org network;
+// on a ledger initialised with two banks they read as zero on both peers.
+var ledgerBanks = []string{"BANKIN", "BANKFX", "BANKUS", "BANKSG"}
+
 func equalBal(a, b map[string]map[string]int64) bool {
-	for _, bank := range []string{"BANKIN", "BANKFX"} {
+	for _, bank := range ledgerBanks {
 		for _, ccy := range []string{"INR", "USD"} {
 			if a[bank][ccy] != b[bank][ccy] {
 				return false

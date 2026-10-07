@@ -57,6 +57,16 @@ type Config struct {
 	Parties   []PartyConfig
 }
 
+// ChaincodeName is the chaincode the gateway and pvpctl talk to:
+// $CHAINCODE_NAME, or "pvp". The liquidity-engine build is deployed as
+// "pvp-le" next to "pvp" on the same channel, with its own state.
+func ChaincodeName() string {
+	if n := strings.TrimSpace(os.Getenv("CHAINCODE_NAME")); n != "" {
+		return n
+	}
+	return "pvp"
+}
+
 // DefaultConfig matches the Drunix test network (see NOTES.md D3):
 // Org1 lite peer :7051, Org2 lite peer :9051. The peerless Oracle and
 // Auditor orgs use Org1's lite peer as their gateway.
@@ -76,7 +86,7 @@ func DefaultConfig(orgsDir string) Config {
 		}
 	}
 	return Config{
-		Channel: "mychannel", Chaincode: "pvp",
+		Channel: "mychannel", Chaincode: ChaincodeName(),
 		Parties: []PartyConfig{
 			p(BankIN, "Org1MSP", "org1", "org1", "7051"),
 			p(BankFX, "Org2MSP", "org2", "org2", "9051"),
