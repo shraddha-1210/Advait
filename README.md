@@ -127,7 +127,7 @@ Security is the main feature. Every check runs in the chaincode or in network va
 
 ### Threat matrix
 
-"Unit" means covered by the Go unit tests against the real chaincode code. "Live" means also exercised against the running Drunix network through the gateway in our earlier runs. The liquidity-engine rows have unit coverage; their live tests are written but have not yet been run (see section 10).
+"Unit" means covered by the Go unit tests against the real chaincode code. "Live" means also exercised against the running Drunix network through the gateway; the full integration suite last ran against the liquidity-engine chaincode (`pvp-le`) on 7 October 2026 (section 10).
 
 | Attack | What stops it | Code returned | Tested |
 |---|---|---|---|
@@ -157,7 +157,7 @@ Security is the main feature. Every check runs in the chaincode or in network va
 | Spend a bank's funds between a liquidity preview and settlement | Settlement re-runs the resolver against current balances: more trades are dropped, or nothing settles | `ERR_GRIDLOCK` if nothing can settle | Unit |
 | Include a withdrawn, unknown, one-sided or settled trade in a liquidity batch | The whole batch is refused, not just that trade | `ERR_TRADE_NOT_FOUND`, `ERR_UNILATERAL`, `ERR_ALREADY_SETTLED` | Unit |
 | Repeat a trade in one batch, or reuse a batch ID | Duplicates refused; batch IDs are single-use across netting and liquidity | `ERR_BATCH`, `ERR_REPLAY` | Unit |
-| A batch no subset of which can be funded | Nothing settles and nothing is written | `ERR_GRIDLOCK` | Unit |
+| A batch no subset of which can be funded | Nothing settles and nothing is written | `ERR_GRIDLOCK` | Unit, Live |
 | Negative, zero, decimal, `1e5`, `+100`, leading zeros | Strict integer parsing in minor units | `ERR_INVALID_AMOUNT` | Unit, Live |
 | Amount above int64, or above the 10^15 cap | Range checks and big-integer arithmetic | `ERR_AMOUNT_OVERFLOW` | Unit, Live |
 | Re-run InitLedger to pin a new oracle key and mint balances | Initialisation runs once | `ERR_ALREADY_INITIALIZED` | Unit, Live |
@@ -198,7 +198,7 @@ We model a bank with valid credentials that attacks. Two controls matter:
 **Runs today**
 - The Drunix test network (commit `ddc0eae`) locally in Docker on Windows 11 with WSL2: one orderer, two bank orgs each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB, and the OracleMSP and AuditorMSP member orgs.
 - Atomic settlement, bilateral netting, the attack scenarios and the audit view were run live through the gateway and frontend in earlier runs, against the `pvp` chaincode.
-- The liquidity engine, four-bank netting and the Liquidity screen are built and unit-tested. They are deployed under a separate chaincode name, `pvp-le`, next to `pvp` on the same channel, so the running `pvp` chaincode and its ledger state are untouched. That live deployment has not yet been run (section 10).
+- The liquidity engine and four-bank netting run live. They are deployed under a separate chaincode name, `pvp-le`, next to `pvp` on the same channel with the same endorsement policy, so the `pvp` chaincode and its ledger state are untouched. On 7 October 2026 `pvp-le` was deployed, initialised with four ledger banks, seeded with the 16 demo trades, and passed the full integration suite (section 10). The Liquidity screen is built and type-checked; it has not yet been exercised in a browser against the live gateway.
 
 **What a real deployment would need that this prototype does not have:** a real settlement asset such as central bank money or a wholesale CBDC; legal settlement finality, rulebooks and governance between the banks and NPCI; hardware-backed key management with each bank running its own gateway; a governed rate source; real participant onboarding; and regulatory approval.
 
@@ -221,11 +221,11 @@ Results from the run on this branch (raw output is in the branch's final report)
 |---|---|
 | Chaincode unit tests (`chaincode/pvp`, `go test ./...`) | 95 test functions, all passing; `go vet` and `gofmt` clean |
 | Gateway unit tests (`gateway`, excluding the integration package) | 24 test functions, all passing; `go vet` and `gofmt` clean |
-| Mutation check (`scripts/mutation-check.sh`) | 47 injected bugs, every one caught |
+| Mutation check (`scripts/mutation-check.sh`) | 47 injected bugs, every one caught, both run directly in WSL and in the `Dockerfile.mutation` image (Go 1.23) |
 | Frontend (`npm run build`: `tsc -b` and `vite build`) | Builds cleanly |
-| Integration tests (`gateway/integration`, 16 test functions) | Compile and pass `go vet -tags integration`. **Not run on this branch**: no Drunix network was available. The 13 tests for the `pvp` chaincode passed in earlier runs; the 3 liquidity tests (four-bank cycle, gridlock, balance-scan headroom) have not yet been run |
+| Integration tests (`gateway/integration`, 16 test functions), live Drunix network, chaincode `pvp-le` | 16 of 16 pass: 15 in the standard run (including the four-bank cycle, the gridlock and the balance-scan headroom tests) and the opt-in peer-down test with `RUN_DISRUPTIVE=1` |
 
-**Not yet verified on the live network:** deploying `pvp-le`, initialising it with four ledger banks, `pvpctl seed`, the liquidity API against a real peer, and the balance-scan headroom check described in section 12. The commands are in section 11, step 9.
+**Live run, 7 October 2026.** On the running network, with `pvp` left untouched: `pvp-le` deployed (committed VALID on both peers), initialised with four ledger banks, rate 83.250000 published, and the 16 seed trades instructed by `pvpctl seed` (a second run skipped all 16). Every seed scenario previewed through the gateway gave the figures the unit tests expect. The balance-scan headroom test read the balance scan 25 times on each peer and counted exactly 8 rows every time. **Not yet exercised:** the Liquidity screen in a browser against the live gateway.
 
 ## 11. How to run
 
@@ -323,7 +323,7 @@ cd "$ADVAITA"/frontend && npm ci && npm run dev   # http://localhost:5180
 ```
 Needs Node.js 20 or later. Set `VITE_GATEWAY_URL` if the gateway is not on `http://localhost:8080`.
 
-**9. Liquidity engine on the live network (not yet run).** The liquidity-engine build is deployed as a separate chaincode, `pvp-le`, on the same channel with the same endorsement policy. It has its own empty state, so the running `pvp` chaincode and its ledger are not touched, and no orgs, peers or channels are added. The gateway, `pvpctl` and the integration tests select the chaincode with `CHAINCODE_NAME`.
+**9. Liquidity engine on the live network** (the commands we ran on 7 October 2026; rebuild the tools first, step 4). The liquidity-engine build is deployed as a separate chaincode, `pvp-le`, on the same channel with the same endorsement policy. It has its own empty state, so the running `pvp` chaincode and its ledger are not touched, and no orgs, peers or channels are added. The gateway, `pvpctl` and the integration tests select the chaincode with `CHAINCODE_NAME`.
 ```bash
 cd "$ADVAITA"
 CC_NAME=pvp-le bash network/deploy-cc.sh 1.0 1
@@ -344,7 +344,7 @@ cd "$ADVAITA"/gateway && CHAINCODE_NAME=pvp-le go test -tags integration ./integ
 - **No real CBDC or central bank money.** Nothing is integrated.
 - **The Oracle and Auditor orgs have no peers.** The Auditor reads through BankIN's lite peer.
 - **Compliance records and private data collections are not built.**
-- **Range scans on Drunix.** Drunix's SQL state database returns at most 10 rows from an unpaginated range scan, unordered, and may repeat a row. The balance scan behind the invariant runs inside writing transactions, where paginated queries are not allowed, so it refuses to run once a scan reaches 10 rows rather than risk summing a subset. With four banks and two currencies there are 8 balance keys, which leaves room for one repeated row. If Drunix repeats two rows in one scan, every settlement fails closed (safe, but unavailable). The live headroom test (`TestBalanceScanHeadroomOnRealNetwork`) checks this and has not yet been run. Adding accounts needs a different design, such as an account registry read by point lookups.
+- **Range scans on Drunix.** Drunix's SQL state database returns at most 10 rows from an unpaginated range scan, unordered, and may repeat a row. The balance scan behind the invariant runs inside writing transactions, where paginated queries are not allowed, so it refuses to run once a scan reaches 10 rows rather than risk summing a subset. With four banks and two currencies there are 8 balance keys, which leaves room for one repeated row. If Drunix repeats two rows in one scan, every settlement fails closed (safe, but unavailable). The live headroom test (`TestBalanceScanHeadroomOnRealNetwork`) read the scan 25 times on each peer and saw exactly 8 rows every time, but a repeated row cannot be ruled out in principle. Adding accounts needs a different design, such as an account registry read by point lookups.
 - **Peer-down error label.** A stopped peer is reported as either `ENDORSER_UNAVAILABLE` or `ENDORSE_FAILED`, depending on the Fabric gateway's wording; the test accepts exactly these two at the endorsement stage.
 - **Trusted bootstrap.** The `InitLedger` configuration is trusted once at deployment and cannot be changed.
 - **Griefing.** A hostile bank that instructs a trade ID first with bad terms can block that trade ID. Nothing moves, and the hostile bank can withdraw only its own instruction.

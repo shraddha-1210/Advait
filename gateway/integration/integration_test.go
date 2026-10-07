@@ -271,6 +271,9 @@ func TestSettlementLandsOnLedgerAndAuditTrail(t *testing.T) {
 	want := map[string]map[string]int64{
 		"BANKIN": {"INR": start.Balances["BANKIN"]["INR"] - inr, "USD": start.Balances["BANKIN"]["USD"] + usd},
 		"BANKFX": {"INR": start.Balances["BANKFX"]["INR"] + inr, "USD": start.Balances["BANKFX"]["USD"] - usd},
+		// The simulated ledger-level accounts are not party to this trade: unchanged.
+		"BANKUS": start.Balances["BANKUS"],
+		"BANKSG": start.Balances["BANKSG"],
 	}
 	if !equalBal(end.Balances, want) {
 		t.Fatalf("balances after settlement:\n got  %v\n want %v", end.Balances, want)
