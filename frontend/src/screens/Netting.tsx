@@ -7,7 +7,7 @@ import { Meta, RejectedPanel, SettledPanel, type Reread } from '../components/Ou
 import { TestTradeToggle } from '../components/TestTradeToggle'
 import { Button, Card, Chip, Empty, ErrorBox, Skeleton } from '../components/ui'
 import { cx } from '../lib/cx'
-import { bankLabel, money, shortHash, timeOf } from '../lib/format'
+import { bankLabel, LEDGER_BANKS, money, shortHash, timeOf } from '../lib/format'
 import { plainReason } from '../lib/reasons'
 import { demoFirst, isTestTrade } from '../lib/trades'
 import { useApi } from '../lib/useApi'
@@ -23,7 +23,7 @@ type Outcome =
 
 function sameBalances(a?: Balances, b?: Balances) {
   if (!a || !b) return false
-  return ['BANKIN', 'BANKFX'].every((bk) => CCYS.every((c) => (a[bk]?.[c] ?? 0) === (b[bk]?.[c] ?? 0)))
+  return LEDGER_BANKS.every((bk) => CCYS.every((c) => (a[bk]?.[c] ?? 0) === (b[bk]?.[c] ?? 0)))
 }
 
 /** Share of the gross that netting removes, as a whole percent (integer maths). */

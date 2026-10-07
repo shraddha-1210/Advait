@@ -91,6 +91,18 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 			return reject(ErrInvalidInput, "bank %s must map to a non-empty MSP ID", b)
 		}
 	}
+	// BANKIN and BANKFX are the two real bank orgs and must be different.
+	// BANKUS and BANKSG are simulated ledger accounts, each custodied by one
+	// of those two orgs; no other MSP may custody a bank.
+	if cfg.Banks[BankIN] == cfg.Banks[BankFX] {
+		return reject(ErrInvalidInput, "%s and %s must be different MSPs", BankIN, BankFX)
+	}
+	for _, b := range allBanks {
+		if m := cfg.Banks[b]; m != cfg.Banks[BankIN] && m != cfg.Banks[BankFX] {
+			return reject(ErrInvalidInput, "bank %s must be custodied by the %s or %s MSP (%s or %s), got %q",
+				b, BankIN, BankFX, cfg.Banks[BankIN], cfg.Banks[BankFX], m)
+		}
+	}
 	for _, a := range cfg.AuditorMSPs {
 		if a == "" {
 			return reject(ErrInvalidInput, "auditor MSP IDs must be non-empty")
@@ -192,8 +204,8 @@ func (c *PvPContract) InitLedger(ctx contractapi.TransactionContextInterface, re
 		}
 	}
 	return appendLog(stub, "INIT", msp, "config",
-		fmt.Sprintf("banks %s=%s %s=%s; oracle %q (MSP %q); auditors %v; supply INR=%d USD=%d",
-			BankIN, cfg.Banks[BankIN], BankFX, cfg.Banks[BankFX], cfg.OracleName, cfg.OracleMSP, cfg.AuditorMSPs, supply[INR], supply[USD]))
+		fmt.Sprintf("banks %s=%s %s=%s %s=%s %s=%s; oracle %q (MSP %q); auditors %v; supply INR=%d USD=%d",
+			BankIN, cfg.Banks[BankIN], BankFX, cfg.Banks[BankFX], BankUS, cfg.Banks[BankUS], BankSG, cfg.Banks[BankSG], cfg.OracleName, cfg.OracleMSP, cfg.AuditorMSPs, supply[INR], supply[USD]))
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +398,9 @@ func (c *PvPContract) SubmitInstruction(ctx contractapi.TransactionContextInterf
 	if bank != in.USDDeliverer && bank != in.INRDeliverer {
 		return reject(ErrInvalidInput, "asBank %s must be either usdDeliverer %s or inrDeliverer %s", bank, in.USDDeliverer, in.INRDeliverer)
 	}
+	if err := requireTwoOrgs(cfg, in.TradeID, in.USDDeliverer, in.INRDeliverer); err != nil {
+		return err
+	}
 
 	usd, err := ParseAmount("usdAmount", in.USDAmount)
 	if err != nil {
@@ -551,6 +566,9 @@ func (c *PvPContract) SettleTrade(ctx contractapi.TransactionContextInterface, t
 	default:
 		return reject(ErrInternal, "trade %s has unknown status %q", tradeID, trade.Status)
 	}
+	if err := requireTwoOrgs(cfg, tradeID, trade.USDDeliverer, trade.INRDeliverer); err != nil {
+		return err
+	}
 	// Re-check the rate at settlement time: it may have gone stale since matching.
 	if _, err := checkRateUsable(stub, cfg, trade.RateSeq, trade.USDAmount, trade.INRAmount); err != nil {
 		return err
@@ -649,7 +667,7 @@ func applyLegs(before Balances, legs []leg, what string) (Balances, error) {
 	return post, nil
 }
 
-// snapshot returns the four bank balances with post-state overrides.
+// snapshot returns every bank's balance in every currency.
 func snapshot(b Balances) map[string]map[string]int64 {
 	out := map[string]map[string]int64{}
 	for _, bank := range allBanks {

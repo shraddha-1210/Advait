@@ -341,7 +341,10 @@ func (s *Server) attack(info AttackInfo) (*AttackReport, error) {
 
 	case "reinit":
 		req, _ := json.Marshal(map[string]any{
-			"banks":           map[string]string{"BANKIN": s.L.MSPID(ledger.BankIN), "BANKFX": s.L.MSPID(ledger.BankFX)},
+			"banks": map[string]string{
+				"BANKIN": s.L.MSPID(ledger.BankIN), "BANKUS": s.L.MSPID(ledger.BankIN),
+				"BANKFX": s.L.MSPID(ledger.BankFX), "BANKSG": s.L.MSPID(ledger.BankFX),
+			},
 			"auditorMsps":     []string{},
 			"pair":            "USD/INR",
 			"oraclePublicKey": oracle.New().PublicKey(),
@@ -350,6 +353,8 @@ func (s *Server) attack(info AttackInfo) (*AttackReport, error) {
 			"balances": map[string]map[string]string{
 				"BANKIN": {"INR": "0", "USD": "0"},
 				"BANKFX": {"INR": "0", "USD": "999999999999999"},
+				"BANKUS": {"INR": "0", "USD": "0"},
+				"BANKSG": {"INR": "0", "USD": "0"},
 			},
 		})
 		fn, args = "InitLedger", []string{string(req)}

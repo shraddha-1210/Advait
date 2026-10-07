@@ -38,3 +38,27 @@ func TestNetRequestJSON(t *testing.T) {
 		t.Errorf("netRequestJSON = %s, want %s", got, want)
 	}
 }
+
+// A balance change on a simulated ledger-level bank (BANKUS/BANKSG) must count
+// as balances moving, not only changes on BANKIN/BANKFX.
+func TestSameBalancesCoversAllLedgerBanks(t *testing.T) {
+	base := func() *Snapshot {
+		s := &Snapshot{Balances: map[string]map[string]int64{}}
+		for _, b := range ledgerBanks {
+			s.Balances[b] = map[string]int64{"INR": 100, "USD": 100}
+		}
+		return s
+	}
+	if !sameBalances(base(), base()) {
+		t.Fatal("identical snapshots reported as different")
+	}
+	for _, b := range ledgerBanks {
+		for _, ccy := range []string{"INR", "USD"} {
+			after := base()
+			after.Balances[b][ccy]++
+			if sameBalances(base(), after) {
+				t.Fatalf("change on %s/%s not detected", b, ccy)
+			}
+		}
+	}
+}

@@ -9,17 +9,19 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// Bilateral netting.
+// Netting.
 //
-// A batch of MATCHED trades between BankIN and BankFX settles as one net
-// movement per currency instead of every trade's gross legs. Everything
+// A batch of MATCHED trades settles as net movements per currency instead of
+// every trade's gross legs. The participants are BankIN and BankFX (the two
+// bank orgs) plus BankUS and BankSG, simulated ledger-level accounts
+// custodied by those same two orgs; every trade spans both orgs. Everything
 // happens in ONE transaction: every trade is checked, funds are checked
 // against the NET position, the invariant runs on the result, and only then
 // are balances, all trade records, the batch record and one audit entry
 // written. Any failure rejects the whole batch and nothing is written.
 //
-// Bilateral only: with exactly two banks, the net per currency is a single
-// amount flowing one way.
+// With only BankIN and BankFX in a batch, the net per currency is a single
+// amount flowing one way, exactly as in bilateral netting.
 
 // MaxBatchSize bounds one batch so a transaction stays small.
 const MaxBatchSize = 50
@@ -159,11 +161,14 @@ func computeNet(batchID string, trades []*Trade) (*NetPlan, error) {
 // Cycle represents a detected circular chain of payment obligations in one currency.
 type Cycle struct {
 	Currency   string   `json:"currency"`
-	Path       []string `json:"path"`       // e.g. ["BANKIN", "BANKFX", "BANKUS", "BANKIN"]
+	Path       []string `json:"path"`       // e.g. ["BANKIN", "BANKFX", "BANKUS", "BANKSG", "BANKIN"]
 	Bottleneck int64    `json:"bottleneck"` // maximum capacity that can be offset along cycle
 }
 
 // DetectCycles finds all simple circular payment obligations across trades deterministically.
+// Callers must have run computeNet on the same trades first: each matrix cell
+// is at most that payer's gross in the currency, which computeNet has already
+// summed with overflow checks, so the plain additions here cannot overflow.
 func DetectCycles(trades []*Trade) []Cycle {
 	var cycles []Cycle
 
@@ -302,6 +307,9 @@ func loadBatch(stub shim.ChaincodeStubInterface, cfg *Config, raw string) (*NetR
 		case StatusMatched:
 		default:
 			return nil, nil, nil, reject(ErrInternal, "trade %s has unknown status %q", id, t.Status)
+		}
+		if err := requireTwoOrgs(cfg, id, t.USDDeliverer, t.INRDeliverer); err != nil {
+			return nil, nil, nil, err
 		}
 		if _, err := checkRateUsable(stub, cfg, t.RateSeq, t.USDAmount, t.INRAmount); err != nil {
 			return nil, nil, nil, err
@@ -459,15 +467,9 @@ func (c *PvPContract) GetBatch(ctx contractapi.TransactionContextInterface, batc
 	return toJSON(b)
 }
 
-// computeMultiNet recomputes all positions directly from stored matched trades.
-// Client-provided totals are never trusted.
-func computeMultiNet(batchID string, trades []*Trade) (*NetPlan, error) {
-	return computeNet(batchID, trades)
-}
-
 // resolveGridlock iteratively removes the largest outgoing trade of an underfunded bank
 // until the remaining trade candidate set is fully funded and resolvable, or no trades remain.
-func resolveGridlock(stub shim.ChaincodeStubInterface, cfg *Config, batchID string, inputTrades []*Trade, before Balances) (*LiquidityPlan, Balances, error) {
+func resolveGridlock(batchID string, inputTrades []*Trade, before Balances) (*LiquidityPlan, Balances, error) {
 	inputIDs := make([]string, len(inputTrades))
 	for i, t := range inputTrades {
 		inputIDs[i] = t.TradeID
@@ -665,6 +667,9 @@ func loadLiquidityBatch(stub shim.ChaincodeStubInterface, cfg *Config, raw strin
 		default:
 			return nil, nil, nil, reject(ErrInternal, "trade %s has unknown status %q", id, t.Status)
 		}
+		if err := requireTwoOrgs(cfg, id, t.USDDeliverer, t.INRDeliverer); err != nil {
+			return nil, nil, nil, err
+		}
 		if _, err := checkRateUsable(stub, cfg, t.RateSeq, t.USDAmount, t.INRAmount); err != nil {
 			return nil, nil, nil, err
 		}
@@ -689,7 +694,7 @@ func (c *PvPContract) PreviewLiquidity(ctx contractapi.TransactionContextInterfa
 	if err != nil {
 		return "", err
 	}
-	plan, _, err := resolveGridlock(stub, cfg, req.BatchID, trades, before)
+	plan, _, err := resolveGridlock(req.BatchID, trades, before)
 	fundsOK, fundsMsg := true, ""
 	if err != nil {
 		fundsOK, fundsMsg = false, err.Error()
@@ -727,7 +732,7 @@ func (c *PvPContract) LiquidityResolve(ctx contractapi.TransactionContextInterfa
 	if err != nil {
 		return err
 	}
-	plan, post, err := resolveGridlock(stub, cfg, req.BatchID, trades, before)
+	plan, post, err := resolveGridlock(req.BatchID, trades, before)
 	if err != nil {
 		return err
 	}

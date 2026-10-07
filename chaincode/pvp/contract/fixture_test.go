@@ -27,7 +27,7 @@ const (
 	openINR_FX = int64(0)
 	openUSD_FX = int64(2_000_000_00) // BankFX: 2 million USD
 	openINR_US = int64(0)
-	openUSD_US = int64(1_000_000_00) // BankUS: 1 million USD
+	openUSD_US = int64(1_000_000_00)   // BankUS: 1 million USD
 	openINR_SG = int64(250_000_000_00) // BankSG: 250 million INR
 	openUSD_SG = int64(0)
 )

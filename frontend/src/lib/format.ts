@@ -51,9 +51,26 @@ export function shortHash(h: string | undefined, n = 10): string {
   return h.length <= n + 2 ? h : `${h.slice(0, n)}…`
 }
 
+/** Every bank account on the ledger, in a fixed order. */
+export const LEDGER_BANKS = ['BANKIN', 'BANKFX', 'BANKUS', 'BANKSG'] as const
+
+/**
+ * BANKUS and BANKSG are simulated ledger-level participants within the
+ * existing two-org network: accounts custodied by BankIN's and BankFX's orgs,
+ * not orgs of their own.
+ */
+export const SIMULATED_BANKS: Record<string, string> = {
+  BANKUS: 'BankIN',
+  BANKSG: 'BankFX',
+}
+
+export const SIMULATED_BANK_NOTE = 'Simulated ledger-level participant within the existing two-org network'
+
 export function bankLabel(b: string): string {
   if (b === 'BANKIN') return 'BankIN'
   if (b === 'BANKFX') return 'BankFX'
+  if (b === 'BANKUS') return 'BankUS'
+  if (b === 'BANKSG') return 'BankSG'
   if (b === 'ORACLE') return 'Oracle'
   if (b === 'AUDITOR') return 'Auditor'
   return b

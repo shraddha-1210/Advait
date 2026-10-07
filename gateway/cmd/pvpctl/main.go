@@ -21,9 +21,24 @@ import (
 )
 
 // Opening balances for the demo (minor units). Simulated tokenized cash.
+// BANKUS and BANKSG are simulated ledger-level participants within the
+// existing two-org network: BANKUS is custodied by BankIN's org, BANKSG by
+// BankFX's org. They are not orgs and have no peers or MSPs of their own.
 var openingBalances = map[string]map[string]string{
 	"BANKIN": {"INR": "50000000000", "USD": "0"}, // 500,000,000.00 INR
 	"BANKFX": {"INR": "0", "USD": "500000000"},   //   5,000,000.00 USD
+	"BANKUS": {"INR": "0", "USD": "100000000"},   //   1,000,000.00 USD
+	"BANKSG": {"INR": "25000000000", "USD": "0"}, // 250,000,000.00 INR
+}
+
+// bankCustodians maps every ledger bank to the MSP of the org that custodies
+// it. The chaincode requires BANKIN and BANKFX to be different orgs and every
+// other bank to be custodied by one of them.
+func bankCustodians(c *ledger.Client) map[string]string {
+	return map[string]string{
+		"BANKIN": c.MSPID(ledger.BankIN), "BANKUS": c.MSPID(ledger.BankIN),
+		"BANKFX": c.MSPID(ledger.BankFX), "BANKSG": c.MSPID(ledger.BankFX),
+	}
 }
 
 func main() {
@@ -59,7 +74,7 @@ func main() {
 			}
 		}
 		req := map[string]any{
-			"banks":           map[string]string{"BANKIN": c.MSPID(ledger.BankIN), "BANKFX": c.MSPID(ledger.BankFX)},
+			"banks":           bankCustodians(c),
 			"auditorMsps":     []string{c.MSPID(ledger.Auditor)},
 			"oracleMsp":       c.MSPID(ledger.Oracle),
 			"pair":            oracle.Pair,

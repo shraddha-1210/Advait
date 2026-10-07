@@ -128,6 +128,27 @@ func authorizeBankCaller(ctx contractapi.TransactionContextInterface, cfg *Confi
 	return msp, nil
 }
 
+// requireTwoOrgs enforces that the two sides of a trade are custodied by
+// different Fabric orgs. Each side must be instructed by its own custodian
+// org, so this is what stops one org from matching (and then settling) a
+// trade alone. Checked when a trade is instructed and again at every
+// settlement path, so a trade record that got past the first check still
+// cannot move value.
+func requireTwoOrgs(cfg *Config, tradeID, usdDeliverer, inrDeliverer string) error {
+	u, i := cfg.Banks[usdDeliverer], cfg.Banks[inrDeliverer]
+	if u == "" || i == "" {
+		return reject(ErrSingleOrgTrade,
+			"trade %s: %s and %s must both be custodied by a configured bank org (got %q and %q)",
+			tradeID, usdDeliverer, inrDeliverer, u, i)
+	}
+	if u == i {
+		return reject(ErrSingleOrgTrade,
+			"trade %s: %s and %s are both custodied by %s; one org cannot be both sides of a trade",
+			tradeID, usdDeliverer, inrDeliverer, u)
+	}
+	return nil
+}
+
 // unpagedScanCap is the most rows a plain (unpaginated) range scan returns on
 // Drunix's SQL state database: GetStateRangeScanIterator is a paginated scan
 // with a fixed page size of 10, and anything after the 10th row is dropped

@@ -61,6 +61,7 @@ flowchart LR
 | Single Drunix network | NPCI's Drunix test network (commit `ddc0eae`), one channel `mychannel`, one Raft orderer, YugabyteDB state database | Both banks share one ledger, so one transaction can touch both banks' balances. We make no claim about atomicity across two separate networks. |
 | Org1MSP (BankIN) | Holds tokenized INR at the start | The Indian bank. |
 | Org2MSP (BankFX) | Holds tokenized USD at the start | The foreign bank. |
+| BankUS, BankSG | Simulated ledger-level participants within the existing two-org network. BankUS is an account custodied by Org1MSP and BankSG by Org2MSP; they have no orgs, peers or MSPs of their own. | Lets one batch hold trades among four ledger accounts without changing the network. Every trade must have one side custodied by each org (see `ERR_SINGLE_ORG_TRADE`), so both orgs still have to instruct every trade. |
 | Lite peers (`:7051`, `:9051`) | Drunix splits a peer's roles. The lite peer runs chaincode and endorses. The committing peer and validation server handle commit. | Each bank runs its own copy of the chaincode, so no single bank decides the result. |
 | Endorsement policy `AND('Org1MSP.peer','Org2MSP.peer')` | Set when the chaincode was deployed | A transaction is valid only if a peer from each bank executed it and signed the same result. |
 | `pvp` chaincode (Go) | All settlement rules: instructions, rate checks, settlement, the invariant, queries | The rules run inside the ledger, not in an app that one party controls. |
@@ -123,6 +124,7 @@ We treat security as the main feature, not an add-on. Each check below runs in t
 | Settlement endorsed by one bank's peer only | Network validation of `AND(Org1MSP.peer, Org2MSP.peer)` | `ENDORSEMENT_POLICY_FAILURE` | Live |
 | Settle a trade the other bank never agreed to | Settlement needs matching instructions from both banks | `ERR_UNILATERAL` | Unit, Live |
 | Bank A instructs on behalf of bank B | Submitter's MSP must match the bank named in the instruction | `ERR_FORGED_INSTRUCTION` | Unit, Live |
+| One org is both sides of a trade (e.g. BankIN and its custodied BankUS) | Both sides must be custodied by different orgs; checked at instruction and again at every settlement path | `ERR_SINGLE_ORG_TRADE` | Unit |
 | Counterparty "matches" with different terms | Every term compared; any difference refused | `ERR_INSTRUCTION_MISMATCH` | Unit, Live |
 | A bank instructs twice to match itself | Second instruction from the same bank refused | `ERR_DUPLICATE_INSTRUCTION` | Unit |
 | A non-bank identity tries to move value | Only the two bank MSPs may instruct or settle | `ERR_UNAUTHORIZED` | Unit |
@@ -202,7 +204,8 @@ We model BankFX as hostile. It has valid network credentials and controls its ow
 - 55 chaincode unit tests (plus 18 subtests), including 8 for netting and 5 for the Oracle and Auditor roles; 8 gateway unit tests (4 in `gateway/internal/api/`, 4 in `gateway/internal/paths/`), the 29-bug mutation check, and 13 integration tests against the live 4-org network (the threat-matrix test has 15 subtests; 4 tests use the real OracleMSP and AuditorMSP identities). The peer-down test stops and restarts a real peer container.
 
 **Simulated**
-- All balances. The opening balances are 500,000,000.00 INR for BankIN and 5,000,000.00 USD for BankFX. No real money or liquidity is involved.
+- All balances. The opening balances are 500,000,000.00 INR for BankIN, 5,000,000.00 USD for BankFX, 1,000,000.00 USD for BankUS and 250,000,000.00 INR for BankSG. No real money or liquidity is involved.
+- BankUS and BankSG. They are simulated ledger-level participants within the existing two-org network, not real orgs.
 - The oracle. It is a real org on the channel with a real Ed25519 key, but the rate is whatever the operator publishes.
 - One gateway process holds a client identity for both banks, the Oracle and the Auditor, so a single machine can drive the demo. In practice each org would sign with its own keys in its own systems.
 
@@ -292,7 +295,7 @@ cd "$ADVAITA" && [ -f network/oracle/oracle.key ] || /root/bin/oracle keygen net
 ```bash
 cd "$ADVAITA"
 bash network/deploy-cc.sh 1.0                                # policy AND('Org1MSP.peer','Org2MSP.peer'); to upgrade later: deploy-cc.sh <version> <next sequence>
-/root/bin/pvpctl init network/oracle/oracle.pub              # once only; a second run returns ERR_ALREADY_INITIALIZED
+/root/bin/pvpctl init network/oracle/oracle.pub              # once only, all four ledger banks; a second run returns ERR_ALREADY_INITIALIZED
 /root/bin/pvpctl publish network/oracle/oracle.key 83250000  # USD/INR = 83.250000, submitted as OracleMSP
 /root/bin/pvpctl query GetBalances
 ```
@@ -354,7 +357,7 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 
 **Limitations**
 - **Single network only.** Both banks are orgs on one Drunix network. There is no atomicity across two separate networks.
-- **Bilateral netting only.** A batch nets between BankIN and BankFX, at most 50 trades. Multilateral netting (three or more banks) is not built.
+- **Netting across four ledger accounts, two orgs.** A batch (at most 50 trades) nets across BankIN, BankFX and the simulated BankUS and BankSG accounts, which are custodied by the same two orgs. This is not multilateral netting between independent institutions; there are still only two bank orgs.
 - **Simulated cash and a simulated oracle.** No real INR or USD moves, and no liquidity is created. The rate is typed in by the operator.
 - **No real CBDC or central bank money.** At most the design could be called CBDC-ready. Nothing is integrated.
 - **The Oracle and Auditor orgs have no peers.** They are real channel members with their own identities, but they endorse nothing and hold no copy of the ledger. The Auditor reads through BankIN's lite peer, so it relies on that peer for what it sees. The Auditor's queries could be run against both banks' peers and compared, but the audit endpoint does not do this yet.
@@ -380,6 +383,6 @@ To start over from an empty ledger, run `./network.sh down` in `/root/drunix/dru
 
 **OUR IMPLEMENTATION.** Atomic two-leg USD/INR settlement on a single Drunix network. Endorsement by both banks is required. Consent is based on matching instructions. The chaincode refuses a defined threat set, including attacks from a hostile participant. A value-conservation invariant is checked on every settlement. FX rates are oracle-signed. There is an append-only audit log. All cash is simulated.
 
-**LIMITATIONS.** Creates no liquidity. Single network. Oracle and Auditor orgs have no peers. Bilateral netting only. No compliance records yet. Simulated oracle and cash. No real banks or governance.
+**LIMITATIONS.** Creates no liquidity. Single network. Oracle and Auditor orgs have no peers. Netting spans only the two bank orgs (BankUS and BankSG are simulated accounts they custody). No compliance records yet. Simulated oracle and cash. No real banks or governance.
 
 **FUTURE WORK.** Multilateral netting, an Auditor peer with private compliance data, a real wholesale CBDC or central bank money leg, and settlement across separate networks.

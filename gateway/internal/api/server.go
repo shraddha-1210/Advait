@@ -121,11 +121,16 @@ func (s *Server) snapshot() (*Snapshot, error) {
 	return &snap, nil
 }
 
+// ledgerBanks is every bank account on the ledger, in a fixed order. BANKUS
+// and BANKSG are simulated ledger-level participants within the existing
+// two-org network, not orgs; they never submit transactions themselves.
+var ledgerBanks = []string{"BANKIN", "BANKFX", "BANKUS", "BANKSG"}
+
 func sameBalances(a, b *Snapshot) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	for _, bank := range []string{"BANKIN", "BANKFX"} {
+	for _, bank := range ledgerBanks {
 		for _, ccy := range []string{"INR", "USD"} {
 			if a.Balances[bank][ccy] != b.Balances[bank][ccy] {
 				return false

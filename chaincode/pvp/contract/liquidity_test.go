@@ -21,7 +21,9 @@ type previewLiquidityView struct {
 func (f *fixture) previewLiquidity(batchID string, ids ...string) (previewLiquidityView, error) {
 	f.t.Helper()
 	req := mustJSON(f.t, LiquidityRequest{BatchID: batchID, TradeIDs: ids})
-	out, err := f.l.query(f.t, mspAuditor, func(ctx contractapi.TransactionContextInterface) (string, error) { return f.cc.PreviewLiquidity(ctx, req) })
+	out, err := f.l.query(f.t, mspAuditor, func(ctx contractapi.TransactionContextInterface) (string, error) {
+		return f.cc.PreviewLiquidity(ctx, req)
+	})
 	var v previewLiquidityView
 	if err == nil {
 		if e := json.Unmarshal([]byte(out), &v); e != nil {
@@ -37,7 +39,7 @@ func (f *fixture) withdraw(msp, tradeID, asBank string) txResult {
 	})
 }
 
-// TestLiquidity_ComputeMultiNet_IgnoresClientTotals verifies that computeMultiNet
+// TestLiquidity_ComputeMultiNet_IgnoresClientTotals verifies that the liquidity path
 // recomputes positions directly from stored matched trades on-ledger.
 func TestLiquidity_ComputeMultiNet_IgnoresClientTotals(t *testing.T) {
 	f := newFixtureWithRate(t)

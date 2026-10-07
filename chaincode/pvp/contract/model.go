@@ -38,7 +38,6 @@ const (
 	StatusPendingMatch = "PENDING_MATCH" // one bank has instructed
 	StatusMatched      = "MATCHED"       // both banks instructed identical terms
 	StatusSettled      = "SETTLED"
-	StatusWithdrawn    = "WITHDRAWN"
 )
 
 // State key prefixes (composite-key object types).
