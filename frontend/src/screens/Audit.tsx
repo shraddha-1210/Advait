@@ -12,6 +12,8 @@ const TYPE_LABEL: Record<string, string> = {
   INSTRUCTED: 'Instructed',
   SETTLED: 'Settled',
   NET_SETTLED: 'Net settled',
+  LIQUIDITY_SETTLED: 'Liquidity settled',
+  INSTRUCTION_WITHDRAWN: 'Instruction withdrawn',
 }
 
 // The regulator's view: read-only, calmer and denser than the interactive
@@ -98,7 +100,7 @@ export function Audit({ online }: { online: boolean }) {
             <p className="mt-1 text-[15px] font-medium text-fg-2">Oldest first, by sequence number</p>
           </div>
           <div className="inline-flex h-9 items-center gap-1 rounded-xl bg-surface-3/70 p-1 ring-1 ring-inset ring-line" role="group" aria-label="Filter by entry type">
-            {['ALL', 'INIT', 'RATE_PUBLISHED', 'INSTRUCTED', 'SETTLED', 'NET_SETTLED'].map((t) => (
+            {['ALL', 'INIT', 'RATE_PUBLISHED', 'INSTRUCTED', 'SETTLED', 'NET_SETTLED', 'LIQUIDITY_SETTLED'].map((t) => (
               <button
                 key={t}
                 onClick={() => setFilter(t)}
@@ -321,7 +323,7 @@ function RowsSkeleton({ rows }: { rows: number }) {
 
 function TypeTag({ type }: { type: string }) {
   const tone =
-    type === 'SETTLED' || type === 'NET_SETTLED'
+    type === 'SETTLED' || type === 'NET_SETTLED' || type === 'LIQUIDITY_SETTLED'
       ? 'bg-ok-soft text-ok ring-ok-line'
       : type === 'INSTRUCTED'
         ? 'bg-surface-2 text-fg-2 ring-line-strong'

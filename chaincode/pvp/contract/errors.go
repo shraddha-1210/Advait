@@ -23,9 +23,12 @@ const (
 	ErrInstructionMismatch  = "ERR_INSTRUCTION_MISMATCH"
 	ErrUnilateral           = "ERR_UNILATERAL"      // settle with one side's instruction only
 	ErrAlreadySettled       = "ERR_ALREADY_SETTLED" // double-settle
+	ErrAlreadyMatched       = "ERR_ALREADY_MATCHED" // withdrawing matched trade
 	ErrReplay               = "ERR_REPLAY"          // re-instructing a settled trade
 	ErrTradeNotFound        = "ERR_TRADE_NOT_FOUND"
 	ErrInsufficientFunds    = "ERR_INSUFFICIENT_FUNDS"
+	ErrGridlock             = "ERR_GRIDLOCK"
+	ErrSingleOrgTrade       = "ERR_SINGLE_ORG_TRADE" // both sides custodied by one org
 
 	// FX oracle attestation.
 	ErrAttestationUnsigned     = "ERR_ATTESTATION_UNSIGNED"

@@ -1,20 +1,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { GATEWAY_URL, getHealth } from './api/client'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { IconAlert, IconArrows, IconBook, IconCheck, IconLayers, IconMoon, IconShield, IconSun, IconX } from './components/Icons'
+import { IconAlert, IconArrows, IconBook, IconCheck, IconLayers, IconMoon, IconScale, IconShield, IconSun, IconX } from './components/Icons'
 import { cx } from './lib/cx'
 import { bankLabel } from './lib/format'
 import { useApi } from './lib/useApi'
 import { Audit } from './screens/Audit'
+import { Liquidity } from './screens/Liquidity'
 import { Netting } from './screens/Netting'
 import { Security } from './screens/Security'
 import { Settlement } from './screens/Settlement'
 
-type Tab = 'settlement' | 'netting' | 'security' | 'audit'
+type Tab = 'settlement' | 'netting' | 'liquidity' | 'security' | 'audit'
 
 const TABS: { id: Tab; label: string; title: string; icon: ReactNode }[] = [
   { id: 'settlement', label: 'Settlement', title: 'Atomic settlement', icon: <IconArrows size={18} /> },
   { id: 'netting', label: 'Netting', title: 'Bilateral netting', icon: <IconLayers size={18} /> },
+  { id: 'liquidity', label: 'Liquidity', title: 'Liquidity engine', icon: <IconScale size={18} /> },
   { id: 'security', label: 'Security', title: 'Threat rejection', icon: <IconShield size={18} /> },
   { id: 'audit', label: 'Audit', title: 'Regulator audit view', icon: <IconBook size={18} /> },
 ]
@@ -25,6 +27,8 @@ export default function App() {
   const [dark, setDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
   const health = useApi(getHealth, 5_000)
   const online = !!health.data?.ok
+  // Banks pinned in this ledger's configuration (two or four), from GetConfig via /api/health.
+  const ledgerBanks = Object.keys(health.data?.config?.banks ?? {})
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
@@ -119,8 +123,9 @@ export default function App() {
 
         <main id="main" key={tab} className="anim-rise flex-1 px-10 py-8">
           <ErrorBoundary key={tab} name={current.label}>
-            {tab === 'settlement' && <Settlement online={online} />}
+            {tab === 'settlement' && <Settlement online={online} ledgerBanks={ledgerBanks} />}
             {tab === 'netting' && <Netting online={online} />}
+            {tab === 'liquidity' && <Liquidity online={online} ledgerBanks={ledgerBanks} />}
             {tab === 'security' && <Security online={online} />}
             {tab === 'audit' && <Audit online={online} />}
           </ErrorBoundary>

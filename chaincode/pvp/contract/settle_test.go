@@ -22,6 +22,8 @@ func TestInitLedgerSetsBalancesAndFixedSupply(t *testing.T) {
 	want := map[string]map[string]int64{
 		BankIN: {INR: openINR_IN, USD: openUSD_IN},
 		BankFX: {INR: openINR_FX, USD: openUSD_FX},
+		BankUS: {INR: openINR_US, USD: openUSD_US},
+		BankSG: {INR: openINR_SG, USD: openUSD_SG},
 	}
 	for bank, m := range want {
 		for ccy, v := range m {

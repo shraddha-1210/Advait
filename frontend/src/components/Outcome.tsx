@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react'
 import type { Balances, WriteResult } from '../api/types'
 import { cx } from '../lib/cx'
-import { bankLabel, money } from '../lib/format'
+import { bankLabel, LEDGER_BANKS, money, SIMULATED_BANKS } from '../lib/format'
 import { plainReason } from '../lib/reasons'
 import { IconCheck, IconX } from './Icons'
 
-const BANKS = ['BANKIN', 'BANKFX'] as const
 const CCYS = ['INR', 'USD'] as const
 
 export type Reread = 'pending' | 'unchanged' | 'changed' | 'failed'
@@ -97,13 +96,14 @@ export function BeforeAfter({ before, after }: { before?: Balances; after?: Bala
           </tr>
         </thead>
         <tbody className="tnum">
-          {BANKS.flatMap((b) =>
+          {LEDGER_BANKS.flatMap((b) =>
             CCYS.map((c) => {
               const d = (after[b]?.[c] ?? 0) - (before[b]?.[c] ?? 0)
               return (
                 <tr key={b + c} className="border-t border-line">
                   <td className="py-2 pr-4 font-medium">
                     {bankLabel(b)} {c}
+                    {SIMULATED_BANKS[b] && <span className="ml-1.5 text-xs font-normal text-muted">(simulated)</span>}
                   </td>
                   <td className="py-2 pr-4 text-right text-muted">{money(before[b]?.[c] ?? 0, c)}</td>
                   <td className="py-2 pr-4 text-right">{money(after[b]?.[c] ?? 0, c)}</td>

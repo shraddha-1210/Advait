@@ -17,7 +17,7 @@ export type Currency = 'INR' | 'USD'
 export type TradeStatus = 'PENDING_MATCH' | 'MATCHED' | 'SETTLED'
 
 /** Audit log types written by appendLog in contract.go. */
-export type LogType = 'INIT' | 'RATE_PUBLISHED' | 'INSTRUCTED' | 'SETTLED' | 'NET_SETTLED'
+export type LogType = 'INIT' | 'RATE_PUBLISHED' | 'INSTRUCTED' | 'INSTRUCTION_WITHDRAWN' | 'SETTLED' | 'NET_SETTLED' | 'LIQUIDITY_SETTLED'
 
 /** bank -> currency -> minor units. contract.go snapshot(). */
 export type Balances = Record<string, Record<string, number>>
@@ -317,4 +317,79 @@ export interface NetSettleResponse {
 /** writeErr (server.go): every non-2xx response except /api/health. */
 export interface GatewayError {
   error: string
+}
+
+/** contract.Removal (liquidity.go): one gridlock-resolution step. */
+export interface Removal {
+  step: number
+  tradeId: string
+  /** the short bank, and the currency it was short in */
+  bank: string
+  currency: string
+  /** net outflow minus balance, before this removal (minor units) */
+  shortfall: number
+  /** the removed trade's leg that bank would have paid (minor units) */
+  amount: number
+}
+
+/** contract.Cycle (netting.go): a circular chain of obligations in one currency. */
+export interface Cycle {
+  currency: string
+  /** banks in order, first repeated at the end */
+  path: string[]
+  /** amount offset around the cycle */
+  bottleneck: number
+}
+
+/** contract.LiquidityPlan (liquidity.go). Computed by the chaincode from ledger state. */
+export interface LiquidityPlan {
+  batchId: string
+  inputTradeIds: string[]
+  settledTradeIds: string[]
+  droppedTradeIds: string[]
+  removals: Removal[]
+  cycles: Cycle[]
+  /** absent when gridlocked */
+  netPlan?: NetPlan
+  gridlocked: boolean
+}
+
+/** POST /api/liquidity/preview (chaincode PreviewLiquidity). 422 with {error} if a trade is invalid. */
+export interface LiquidityPreview {
+  plan: LiquidityPlan
+  fundsOk: boolean
+  fundsMessage: string
+}
+
+/** POST /api/liquidity/resolve: every MATCHED trade (up to 50) and the chaincode's preview of them. */
+export interface LiquidityResolve {
+  batchId: string
+  tradeIds: string[]
+  matched: number
+  truncated: boolean
+  preview: LiquidityPreview | null
+}
+
+/** contract.LiquidityDetail, stored on a liquidity batch record. */
+export interface LiquidityDetail {
+  inputTradeIds: string[]
+  droppedTradeIds: string[]
+  removals: Removal[]
+  cycles: Cycle[]
+}
+
+/** api.LiquiditySettleResponse (gateway liquidity.go). */
+export interface LiquiditySettleResponse {
+  batchId: string
+  result: WriteResult
+  /** present only when the batch committed (read back with GetBatch) */
+  batch?: Batch & { liquidity?: LiquidityDetail }
+}
+
+/** GET /api/liquidity/scenarios: seed groupings only, no figures. */
+export interface LiquidityScenario {
+  id: string
+  title: string
+  note: string
+  tradeIds: string[]
 }

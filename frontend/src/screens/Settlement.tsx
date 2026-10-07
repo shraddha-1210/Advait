@@ -7,7 +7,17 @@ import { Meta, RejectedPanel, SettledPanel } from '../components/Outcome'
 import { TestTradeToggle } from '../components/TestTradeToggle'
 import { Button, Card, Chip, Empty, ErrorBox, OutcomeLine, Skeleton, StatusChip } from '../components/ui'
 import { cx, inputClass } from '../lib/cx'
-import { bankLabel, money, parseDecimalToMinor, rateFromMicros, shortHash, timeOf } from '../lib/format'
+import {
+  bankLabel,
+  LEDGER_BANKS,
+  money,
+  parseDecimalToMinor,
+  rateFromMicros,
+  shortHash,
+  SIMULATED_BANK_NOTE,
+  SIMULATED_BANKS,
+  timeOf,
+} from '../lib/format'
 import { demoFirst, isTestTrade } from '../lib/trades'
 import { useApi, type ApiState } from '../lib/useApi'
 import { Completeness } from './Audit'
@@ -25,7 +35,7 @@ type Phase =
 
 function sameBalances(a: Balances | undefined, b: Balances | undefined): boolean {
   if (!a || !b) return false
-  return BANKS.every((bk) => CCYS.every((c) => (a[bk]?.[c] ?? 0) === (b[bk]?.[c] ?? 0)))
+  return LEDGER_BANKS.every((bk) => CCYS.every((c) => (a[bk]?.[c] ?? 0) === (b[bk]?.[c] ?? 0)))
 }
 
 function newTradeId(): string {
@@ -33,7 +43,7 @@ function newTradeId(): string {
   return 'USDINR-' + Date.now().toString(36).toUpperCase()
 }
 
-export function Settlement({ online }: { online: boolean }) {
+export function Settlement({ online, ledgerBanks }: { online: boolean; ledgerBanks: string[] }) {
   const state = useApi(getState, 10_000)
   const audit = useApi(getAudit, 15_000)
   const [selected, setSelected] = useState<string | null>(null)
@@ -175,6 +185,22 @@ export function Settlement({ online }: { online: boolean }) {
           void audit.reload()
         }}
       />
+
+      {/* Only accounts this ledger was initialised with: a two-bank ledger has no BankUS/BankSG. */}
+      {Object.keys(SIMULATED_BANKS).filter((b) => ledgerBanks.includes(b)).map((b) => (
+        <BalanceCard
+          key={`${b}-${phase.kind}-${phaseTradeId ?? ''}`}
+          className="col-span-12 md:col-span-6"
+          bank={b}
+          balances={snap?.balances}
+          flash={null}
+          before={settledResult?.before?.balances ?? null}
+          after={settledResult?.after?.balances ?? null}
+          unchanged={rejected?.reread === 'unchanged'}
+          readAt={snap?.readAt}
+          refreshing={state.refreshing && !pending}
+        />
+      ))}
 
       <NewTrade
         className="col-span-12 xl:col-span-5"
@@ -482,6 +508,8 @@ function AtomicLink({ state }: { state: LegState }) {
 const BANK_ROLE: Record<string, string> = {
   BANKIN: 'Holds tokenized INR',
   BANKFX: 'Holds tokenized USD',
+  BANKUS: `${SIMULATED_BANK_NOTE}, custodied by ${SIMULATED_BANKS.BANKUS}'s org`,
+  BANKSG: `${SIMULATED_BANK_NOTE}, custodied by ${SIMULATED_BANKS.BANKSG}'s org`,
 }
 
 function BalanceCard({
@@ -983,9 +1011,9 @@ function History({ className, trades, audit, online }: { className?: string; tra
   const all = audit.data?.log ?? []
   const maxN = all.reduce((m, e) => Math.max(m, e.n), 0)
   // Newest first, by the log's own sequence number.
-  const settledRows = all.filter((e) => e.type === 'SETTLED' || e.type === 'NET_SETTLED')
+  const settledRows = all.filter((e) => e.type === 'SETTLED' || e.type === 'NET_SETTLED' || e.type === 'LIQUIDITY_SETTLED')
   // Net batches are never test-suite trades; gross rows are hidden by trade ID.
-  const rows = (hideTests ? settledRows.filter((e) => e.type === 'NET_SETTLED' || !isTestTrade(e.ref)) : settledRows).sort((x, y) => y.n - x.n)
+  const rows = (hideTests ? settledRows.filter((e) => e.type === 'NET_SETTLED' || e.type === 'LIQUIDITY_SETTLED' || !isTestTrade(e.ref)) : settledRows).sort((x, y) => y.n - x.n)
   return (
     <Card
       className={className}
@@ -1021,6 +1049,7 @@ function History({ className, trades, audit, online }: { className?: string; tra
                       <p className="flex items-center gap-2 text-sm font-semibold">
                         <span className="font-mono text-[13px]">{e.ref}</span>
                         {e.type === 'NET_SETTLED' && <Chip tone="accent" className="!h-5 !px-2 text-[10px]">Net batch</Chip>}
+                        {e.type === 'LIQUIDITY_SETTLED' && <Chip tone="accent" className="!h-5 !px-2 text-[10px]">Liquidity batch</Chip>}
                         <span className="text-xs font-normal text-muted">#{e.n}</span>
                       </p>
                       <p className="mt-0.5 truncate text-xs text-muted">

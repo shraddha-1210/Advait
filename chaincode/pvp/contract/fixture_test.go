@@ -26,6 +26,10 @@ const (
 	openUSD_IN = int64(0)
 	openINR_FX = int64(0)
 	openUSD_FX = int64(2_000_000_00) // BankFX: 2 million USD
+	openINR_US = int64(0)
+	openUSD_US = int64(1_000_000_00)   // BankUS: 1 million USD
+	openINR_SG = int64(250_000_000_00) // BankSG: 250 million INR
+	openUSD_SG = int64(0)
 )
 
 func oracleKey(seed string) ed25519.PrivateKey {
@@ -47,7 +51,12 @@ type fixture struct {
 func initRequest() InitRequest {
 	return InitRequest{
 		Config: Config{
-			Banks:           map[string]string{BankIN: mspIN, BankFX: mspFX},
+			Banks: map[string]string{
+				BankIN: mspIN,
+				BankFX: mspFX,
+				BankUS: mspIN, // proxy authorization mapping
+				BankSG: mspFX, // proxy authorization mapping
+			},
 			AuditorMSPs:     []string{mspAuditor},
 			OracleMSP:       mspOracle,
 			Pair:            "USD/INR",
@@ -58,6 +67,8 @@ func initRequest() InitRequest {
 		Balances: map[string]map[string]string{
 			BankIN: {INR: strconv.FormatInt(openINR_IN, 10), USD: strconv.FormatInt(openUSD_IN, 10)},
 			BankFX: {INR: strconv.FormatInt(openINR_FX, 10), USD: strconv.FormatInt(openUSD_FX, 10)},
+			BankUS: {INR: strconv.FormatInt(openINR_US, 10), USD: strconv.FormatInt(openUSD_US, 10)},
+			BankSG: {INR: strconv.FormatInt(openINR_SG, 10), USD: strconv.FormatInt(openUSD_SG, 10)},
 		},
 	}
 }
@@ -134,8 +145,21 @@ func (f *fixture) quote(usd, seq int64) int64 {
 
 // trade builds an instruction priced by the chaincode's own quote.
 func (f *fixture) trade(id, asBank, usdDeliverer string, usd, seq int64) Instruction {
+	inrDeliverer := BankIN
+	if usdDeliverer == BankIN {
+		inrDeliverer = BankFX
+	}
 	return Instruction{
-		TradeID: id, AsBank: asBank, USDDeliverer: usdDeliverer,
+		TradeID: id, AsBank: asBank, USDDeliverer: usdDeliverer, INRDeliverer: inrDeliverer,
+		USDAmount: strconv.FormatInt(usd, 10),
+		INRAmount: strconv.FormatInt(f.quote(usd, seq), 10),
+		RateSeq:   seq,
+	}
+}
+
+func (f *fixture) trade4(id, asBank, usdDeliverer, inrDeliverer string, usd, seq int64) Instruction {
+	return Instruction{
+		TradeID: id, AsBank: asBank, USDDeliverer: usdDeliverer, INRDeliverer: inrDeliverer,
 		USDAmount: strconv.FormatInt(usd, 10),
 		INRAmount: strconv.FormatInt(f.quote(usd, seq), 10),
 		RateSeq:   seq,
@@ -199,7 +223,10 @@ func (f *fixture) mustInvariantHolds() {
 		f.t.Fatalf("value-conservation invariant does not hold: %+v", inv.Currencies)
 	}
 	// Supply is fixed at init: the opening totals.
-	want := map[string]int64{INR: openINR_IN + openINR_FX, USD: openUSD_IN + openUSD_FX}
+	want := map[string]int64{
+		INR: openINR_IN + openINR_FX + openINR_US + openINR_SG,
+		USD: openUSD_IN + openUSD_FX + openUSD_US + openUSD_SG,
+	}
 	for _, c := range inv.Currencies {
 		if c.Supply != want[c.Currency] || c.Sum != want[c.Currency] {
 			f.t.Fatalf("%s: supply %d sum %d, want both %d", c.Currency, c.Supply, c.Sum, want[c.Currency])

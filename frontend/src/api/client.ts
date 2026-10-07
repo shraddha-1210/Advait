@@ -6,6 +6,10 @@ import type {
   Audit,
   Health,
   InstructionBody,
+  LiquidityPreview,
+  LiquidityResolve,
+  LiquidityScenario,
+  LiquiditySettleResponse,
   NetPreview,
   NetSettleResponse,
   Party,
@@ -96,5 +100,19 @@ export const previewNet = (tradeIds: string[]) => request<NetPreview>('POST', '/
 
 /** Settle a batch as one net movement per currency, in one transaction. */
 export const netSettle = (tradeIds: string[], as: Party) => request<NetSettleResponse>('POST', '/api/net-settle', { tradeIds, as })
+
+/** Liquidity engine: the chaincode resolves gridlock and nets the listed trades (read-only). */
+export const previewLiquidity = (tradeIds: string[]) =>
+  request<LiquidityPreview>('POST', '/api/liquidity/preview', { tradeIds })
+
+/** Every MATCHED trade on the ledger (up to 50) and the chaincode's preview of settling them together. */
+export const resolveLiquidity = () => request<LiquidityResolve>('POST', '/api/liquidity/resolve', {})
+
+/** Settle the resolvable set of the listed trades, net, in one transaction (or nothing). */
+export const liquiditySettle = (tradeIds: string[], as: Party) =>
+  request<LiquiditySettleResponse>('POST', '/api/liquidity/settle', { tradeIds, as })
+
+/** Seed scenario groupings (titles and trade IDs only). */
+export const getLiquidityScenarios = () => request<{ scenarios: LiquidityScenario[] }>('GET', '/api/liquidity/scenarios')
 
 export const runAttack = (name: string) => request<AttackReport>('POST', `/api/attacks/${encodeURIComponent(name)}`)

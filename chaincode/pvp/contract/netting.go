@@ -9,17 +9,19 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
 )
 
-// Bilateral netting.
+// Netting.
 //
-// A batch of MATCHED trades between BankIN and BankFX settles as one net
-// movement per currency instead of every trade's gross legs. Everything
+// A batch of MATCHED trades settles as net movements per currency instead of
+// every trade's gross legs. The participants are BankIN and BankFX (the two
+// bank orgs) plus BankUS and BankSG, simulated ledger-level accounts
+// custodied by those same two orgs; every trade spans both orgs. Everything
 // happens in ONE transaction: every trade is checked, funds are checked
 // against the NET position, the invariant runs on the result, and only then
 // are balances, all trade records, the batch record and one audit entry
 // written. Any failure rejects the whole batch and nothing is written.
 //
-// Bilateral only: with exactly two banks, the net per currency is a single
-// amount flowing one way.
+// With only BankIN and BankFX in a batch, the net per currency is a single
+// amount flowing one way, exactly as in bilateral netting.
 
 // MaxBatchSize bounds one batch so a transaction stays small.
 const MaxBatchSize = 50
@@ -59,16 +61,27 @@ type Batch struct {
 	// Real balances immediately before and after the net settlement.
 	BalancesBefore map[string]map[string]int64 `json:"balancesBefore"`
 	BalancesAfter  map[string]map[string]int64 `json:"balancesAfter"`
+	// Set only for a batch settled by LiquiditySettle.
+	Liquidity *LiquidityDetail `json:"liquidity,omitempty"`
 }
 
-// computeNet nets a batch of trades. It is pure: it reads nothing and writes
-// nothing, so PreviewNet and NetSettle use exactly the same arithmetic.
+// computeNet nets a batch of trades across all participant banks multilaterally.
+// It is pure: it reads nothing and writes nothing, so PreviewNet and NetSettle use exactly the same arithmetic.
 func computeNet(batchID string, trades []*Trade) (*NetPlan, error) {
 	plan := &NetPlan{
 		BatchID:      batchID,
 		Gross:        map[string]int64{INR: 0, USD: 0},
-		GrossByPayer: map[string]map[string]int64{BankIN: {INR: 0, USD: 0}, BankFX: {INR: 0, USD: 0}},
+		GrossByPayer: map[string]map[string]int64{},
 	}
+	for _, b := range allBanks {
+		plan.GrossByPayer[b] = map[string]int64{INR: 0, USD: 0}
+	}
+
+	grossReceived := map[string]map[string]int64{}
+	for _, b := range allBanks {
+		grossReceived[b] = map[string]int64{INR: 0, USD: 0}
+	}
+
 	for _, t := range trades {
 		plan.TradeIDs = append(plan.TradeIDs, t.TradeID)
 		for _, l := range []leg{
@@ -83,30 +96,168 @@ func computeNet(batchID string, trades []*Trade) (*NetPlan, error) {
 				return nil, err
 			}
 			plan.Gross[l.Ccy] = g
+
 			p, err := addChecked(plan.GrossByPayer[l.From][l.Ccy], l.Amount)
 			if err != nil {
 				return nil, err
 			}
 			plan.GrossByPayer[l.From][l.Ccy] = p
+
+			r, err := addChecked(grossReceived[l.To][l.Ccy], l.Amount)
+			if err != nil {
+				return nil, err
+			}
+			grossReceived[l.To][l.Ccy] = r
 		}
 	}
 	sort.Strings(plan.TradeIDs)
-	// Per currency: what BankIN owes BankFX minus what BankFX owes BankIN.
+
+	// Multilateral net positions per currency.
 	for _, ccy := range allCurrencies {
-		d, err := addChecked(plan.GrossByPayer[BankIN][ccy], -plan.GrossByPayer[BankFX][ccy])
-		if err != nil {
-			return nil, err
+		netPos := map[string]int64{}
+		for _, b := range allBanks {
+			netPos[b] = grossReceived[b][ccy] - plan.GrossByPayer[b][ccy]
 		}
-		switch {
-		case d > 0:
-			plan.Net = append(plan.Net, NetLeg{Currency: ccy, From: BankIN, To: BankFX, Amount: d})
-		case d < 0:
-			plan.Net = append(plan.Net, NetLeg{Currency: ccy, From: BankFX, To: BankIN, Amount: -d})
-		default:
+
+		type bankAmt struct {
+			bank string
+			amt  int64
+		}
+		var debtors []bankAmt
+		var creditors []bankAmt
+		for _, b := range allBanks {
+			if netPos[b] < 0 {
+				debtors = append(debtors, bankAmt{bank: b, amt: -netPos[b]})
+			} else if netPos[b] > 0 {
+				creditors = append(creditors, bankAmt{bank: b, amt: netPos[b]})
+			}
+		}
+
+		i, j := 0, 0
+		legsEmitted := 0
+		for i < len(debtors) && j < len(creditors) {
+			transfer := debtors[i].amt
+			if creditors[j].amt < transfer {
+				transfer = creditors[j].amt
+			}
+			if transfer > 0 {
+				plan.Net = append(plan.Net, NetLeg{Currency: ccy, From: debtors[i].bank, To: creditors[j].bank, Amount: transfer})
+				debtors[i].amt -= transfer
+				creditors[j].amt -= transfer
+				legsEmitted++
+			}
+			if debtors[i].amt == 0 {
+				i++
+			}
+			if creditors[j].amt == 0 {
+				j++
+			}
+		}
+		if legsEmitted == 0 {
 			plan.Net = append(plan.Net, NetLeg{Currency: ccy, Amount: 0})
 		}
 	}
 	return plan, nil
+}
+
+// Cycle represents a detected circular chain of payment obligations in one currency.
+type Cycle struct {
+	Currency   string   `json:"currency"`
+	Path       []string `json:"path"`       // e.g. ["BANKIN", "BANKFX", "BANKUS", "BANKSG", "BANKIN"]
+	Bottleneck int64    `json:"bottleneck"` // maximum capacity that can be offset along cycle
+}
+
+// DetectCycles finds all simple circular payment obligations across trades deterministically.
+// Callers must have run computeNet on the same trades first: each matrix cell
+// is at most that payer's gross in the currency, which computeNet has already
+// summed with overflow checks, so the plain additions here cannot overflow.
+func DetectCycles(trades []*Trade) []Cycle {
+	var cycles []Cycle
+
+	for _, ccy := range allCurrencies {
+		matrix := map[string]map[string]int64{}
+		for _, b1 := range allBanks {
+			matrix[b1] = map[string]int64{}
+			for _, b2 := range allBanks {
+				matrix[b1][b2] = 0
+			}
+		}
+		for _, t := range trades {
+			legs := []leg{
+				{From: t.USDDeliverer, To: t.INRDeliverer, Ccy: USD, Amount: t.USDAmount},
+				{From: t.INRDeliverer, To: t.USDDeliverer, Ccy: INR, Amount: t.INRAmount},
+			}
+			for _, l := range legs {
+				if l.Ccy == ccy {
+					matrix[l.From][l.To] += l.Amount
+				}
+			}
+		}
+
+		for {
+			foundCycle := false
+			for _, startBank := range allBanks {
+				visited := map[string]bool{}
+				path := []string{startBank}
+				visited[startBank] = true
+
+				var dfs func(curr string) bool
+				dfs = func(curr string) bool {
+					for _, nextBank := range allBanks {
+						if matrix[curr][nextBank] > 0 {
+							if nextBank == startBank && len(path) >= 2 {
+								pathWithStart := append([]string(nil), path...)
+								pathWithStart = append(pathWithStart, startBank)
+
+								bottleneck := matrix[path[0]][path[1]]
+								for idx := 0; idx < len(path)-1; idx++ {
+									u, v := path[idx], path[idx+1]
+									if matrix[u][v] < bottleneck {
+										bottleneck = matrix[u][v]
+									}
+								}
+								u, v := path[len(path)-1], startBank
+								if matrix[u][v] < bottleneck {
+									bottleneck = matrix[u][v]
+								}
+
+								if bottleneck > 0 {
+									cycles = append(cycles, Cycle{
+										Currency:   ccy,
+										Path:       pathWithStart,
+										Bottleneck: bottleneck,
+									})
+									for idx := 0; idx < len(path)-1; idx++ {
+										matrix[path[idx]][path[idx+1]] -= bottleneck
+									}
+									matrix[path[len(path)-1]][startBank] -= bottleneck
+									foundCycle = true
+									return true
+								}
+							} else if !visited[nextBank] {
+								visited[nextBank] = true
+								path = append(path, nextBank)
+								if dfs(nextBank) {
+									return true
+								}
+								path = path[:len(path)-1]
+								visited[nextBank] = false
+							}
+						}
+					}
+					return false
+				}
+
+				if dfs(startBank) {
+					break
+				}
+			}
+			if !foundCycle {
+				break
+			}
+		}
+	}
+	return cycles
 }
 
 // loadBatch validates a NetRequest and loads its trades. Every trade must
@@ -158,6 +309,9 @@ func loadBatch(stub shim.ChaincodeStubInterface, cfg *Config, raw string) (*NetR
 		case StatusMatched:
 		default:
 			return nil, nil, nil, reject(ErrInternal, "trade %s has unknown status %q", id, t.Status)
+		}
+		if err := requireTwoOrgs(cfg, id, t.USDDeliverer, t.INRDeliverer); err != nil {
+			return nil, nil, nil, err
 		}
 		if _, err := checkRateUsable(stub, cfg, t.RateSeq, t.USDAmount, t.INRAmount); err != nil {
 			return nil, nil, nil, err

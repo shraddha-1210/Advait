@@ -65,7 +65,11 @@ func (l *fakeLedger) invoke(msp string, fn func(ctx contractapi.TransactionConte
 	res := txResult{TxID: stub.txID, Err: err, Writes: stub.writes, Events: stub.events}
 	if err == nil {
 		for k, v := range stub.writes {
-			l.committed[k] = v
+			if v == nil {
+				delete(l.committed, k)
+			} else {
+				l.committed[k] = v
+			}
 		}
 		res.Committed = true
 	}
@@ -140,6 +144,17 @@ func (s *txStub) PutState(key string, value []byte) error {
 		return fmt.Errorf("txid [%s]: unsuppored transaction. Transaction has already performed a paginated query. Writes are not allowed", s.txID)
 	}
 	s.writes[key] = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *txStub) DelState(key string) error {
+	if key == "" {
+		return fmt.Errorf("empty key")
+	}
+	if s.paginated {
+		return fmt.Errorf("txid [%s]: unsupported transaction. Transaction has already performed a paginated query. Writes are not allowed", s.txID)
+	}
+	s.writes[key] = nil
 	return nil
 }
 

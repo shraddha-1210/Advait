@@ -7,6 +7,8 @@ import "github.com/advait/pvp-settlement/chaincode/attest"
 const (
 	BankIN = "BANKIN"
 	BankFX = "BANKFX"
+	BankUS = "BANKUS"
+	BankSG = "BANKSG"
 )
 
 // Currencies held on-ledger (simulated tokenized cash).
@@ -16,7 +18,7 @@ const (
 )
 
 var (
-	allBanks      = []string{BankIN, BankFX} // fixed order: determinism
+	allBanks      = []string{BankIN, BankFX, BankUS, BankSG} // fixed order: determinism
 	allCurrencies = []string{INR, USD}
 )
 
@@ -27,7 +29,9 @@ func otherBank(b string) string {
 	return BankIN
 }
 
-func isBank(b string) bool { return b == BankIN || b == BankFX }
+func isBank(b string) bool {
+	return b == BankIN || b == BankFX || b == BankUS || b == BankSG
+}
 
 // Trade statuses.
 const (
@@ -85,8 +89,9 @@ type RateRecord struct {
 // Instruction is one bank's commitment to a trade's exact terms.
 type Instruction struct {
 	TradeID      string `json:"tradeId"`
-	AsBank       string `json:"asBank"`       // must match the submitter's MSP
-	USDDeliverer string `json:"usdDeliverer"` // bank that pays USD; the other pays INR
+	AsBank       string `json:"asBank"`       // logical bank participant instructing; must match submitter MSP authorization
+	USDDeliverer string `json:"usdDeliverer"` // bank that pays USD
+	INRDeliverer string `json:"inrDeliverer"` // bank that pays INR
 	USDAmount    string `json:"usdAmount"`    // cents
 	INRAmount    string `json:"inrAmount"`    // paise
 	RateSeq      int64  `json:"rateSeq"`      // attestation the terms were priced at

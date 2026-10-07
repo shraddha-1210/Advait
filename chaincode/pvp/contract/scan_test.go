@@ -74,9 +74,9 @@ func TestInvariant_FailsClosedWhenBalanceScanMayBeTruncated(t *testing.T) {
 	f := newFixtureWithRate(t)
 	f.matched("T1", BankFX, 100_00, 1)
 
-	// 4 real accounts + 6 stray zero-balance accounts = 10 BAL~ keys, the cap.
+	// 8 real accounts + 2 stray zero-balance accounts = 10 BAL~ keys, the cap.
 	// Zero balances keep every sum correct, so only the cap can trigger this.
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 2; i++ {
 		k, err := shim.CreateCompositeKey(keyBalance, []string{fmt.Sprintf("STRAY%d", i), USD})
 		if err != nil {
 			t.Fatal(err)
@@ -95,7 +95,7 @@ func TestInvariant_FailsClosedWhenBalanceScanMayBeTruncated(t *testing.T) {
 func TestInvariant_ScanBelowCapStillSettles(t *testing.T) {
 	f := newFixtureWithRate(t)
 	f.matched("T1", BankFX, 100_00, 1)
-	for i := 0; i < 5; i++ { // 4 + 5 = 9 keys
+	for i := 0; i < 1; i++ { // 8 + 1 = 9 keys
 		k, err := shim.CreateCompositeKey(keyBalance, []string{fmt.Sprintf("STRAY%d", i), USD})
 		if err != nil {
 			t.Fatal(err)
