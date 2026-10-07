@@ -76,6 +76,7 @@ mutate "liquidity marks dropped trades settled"       liquidity.go 's/if !settle
 mutate "liquidity invariant check skipped"            liquidity.go 's/if err := assertConservation\(stub, post\); err != nil \{\n\t\treturn err\n\t\}/_ = assertConservation/'
 mutate "liquidity batch ID replay allowed"            liquidity.go 's/\} else if found \{/} else if false \&\& found {/'
 mutate "liquidity gridlock settles anyway (no shortfall check)" liquidity.go 's/if len\(short\) == 0 \{/if true {/'
+mutate "liquidity settle open to non-bank callers"    liquidity.go 's/_, msp, err := callerBank\(ctx, cfg\)/msp, err := "", error(nil)/'
 echo "killed: $pass   survived/not-applied: $fail"
 rm -rf "$WORK"
 [ "$fail" -eq 0 ]
