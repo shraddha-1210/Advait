@@ -4,6 +4,8 @@
 
 Payment-versus-payment settlement for USD/INR trades on NPCI's Drunix ledger: neither currency leg moves unless both do.
 
+**[Demo video](https://drive.google.com/drive/folders/1rLhT8HK3OfQV2QEUr6VbyXWv4MX09MCC?usp=sharing)** · [Screenshots](#3-screenshots)
+
 </div>
 
 ---
@@ -26,7 +28,51 @@ Advait is a working prototype of a PvP settlement layer for USD/INR on a single 
 
 All cash on the ledger is simulated tokenized balance. No real money moves and no liquidity is created.
 
-## 3. Architecture
+## 3. Screenshots
+
+Captured on 24 October 2026 from the frontend (`http://localhost:5180`) running against the live Drunix network through the gateway, with the `pvp-le` chaincode and its seed data. Every figure on screen was read from the ledger at that moment. The images are in [`docs/ss/`](docs/ss/). A recorded walkthrough is in the [demo video](https://drive.google.com/drive/folders/1rLhT8HK3OfQV2QEUr6VbyXWv4MX09MCC?usp=sharing).
+
+### Atomic settlement
+
+A matched trade (LQ01) with both legs shown side by side, the four ledger balances, the oracle-signed USD/INR rate, the form for instructing a new trade, settlement history and the trade ledger.
+
+![Atomic settlement screen](docs/ss/01-settlement.png)
+
+The same screen in dark theme:
+
+![Atomic settlement screen, dark theme](docs/ss/09-settlement-dark.png)
+
+### Bilateral netting
+
+Before selection, and with the four-bank cycle LQ01 to LQ04 selected. The chaincode's preview (`PreviewNet`) shows 1,600,000.00 USD and 13,32,00,000.00 INR gross netting to zero, so no balance would move. This is a read-only preview; nothing was settled.
+
+![Netting screen](docs/ss/02-netting.png)
+
+![Netting preview of a four-bank cycle that nets to zero](docs/ss/03-netting-preview.png)
+
+### Liquidity engine
+
+The six seed scenarios, and the "Gridlock resolved by dropping one trade" scenario previewed (`PreviewLiquidity`): BankUS is 800,000.00 USD short, so the resolver drops LQ13 and 2 of 3 trades can settle. Read-only preview; nothing was settled.
+
+![Liquidity engine screen](docs/ss/04-liquidity.png)
+
+![Liquidity preview resolving a gridlock by dropping one trade](docs/ss/05-liquidity-gridlock.png)
+
+### Threat rejection
+
+The catalogue of 18 attacks run against the live network, the live value-conservation report, and the result of one attack: a hostile BankFX submits an instruction claiming to come from BankIN and is refused with `ERR_FORGED_INSTRUCTION` at endorsement. No balance moves and the invariant holds.
+
+![Threat rejection screen](docs/ss/06-security.png)
+
+![Forged instruction from a malicious org refused](docs/ss/07-security-attack.png)
+
+### Regulator audit view
+
+Queried as `AuditorMSP`: the append-only audit log, FX rate provenance with the verifying key, and the invariant recomputed from every balance on the ledger.
+
+![Regulator audit view](docs/ss/08-audit.png)
+
+## 4. Architecture
 
 ```mermaid
 flowchart LR
@@ -75,7 +121,24 @@ flowchart LR
 
 The Oracle and Auditor orgs are added to the stock two-org test network by `network/add-orgs.sh`, using a channel config update signed by both bank admins. Their clients send proposals through BankIN's lite peer.
 
-## 4. How it works
+## 5. Tech stack
+
+| Layer | Technology | Version | Where / notes |
+|---|---|---|---|
+| Ledger | Drunix, NPCI's fork of Hyperledger Fabric (v2.5.x-compatible) | commit `ddc0eae`; peer and orderer images `npcioss/drunix-*:1.0.0` | Cloned to `/root/drunix` in WSL, not vendored. One channel, `mychannel` |
+| Ordering | Raft | single orderer | `orderer.example.com` |
+| State database | YugabyteDB (SQL), plus KeyDB per org | Drunix test-network defaults | `-s yugabyte` (the default) |
+| Chaincode builder | `npcioss/drunix-ccenv`, `npcioss/drunix-baseos` | `1.0` | Pulled by hand (`NOTES.md` D5) |
+| Chaincode | Go, `fabric-contract-api-go`, `fabric-chaincode-go` | Go 1.23; contract API v2.2.0; chaincode-go v2.0.0 | `chaincode/pvp`; deployed as `pvp` and `pvp-le` |
+| Endorsement policy | `AND('Org1MSP.peer','Org2MSP.peer')` | — | Set by `network/deploy-cc.sh` |
+| FX attestation | Ed25519 signatures (Go standard library `crypto/ed25519`) | — | Signed by `gateway/internal/oracle`, verified in `chaincode/pvp/contract/attestation.go` |
+| Gateway | Go HTTP service, Fabric Gateway SDK, gRPC | Go 1.25; `fabric-gateway` v1.10.0; gRPC v1.83.2 | `gateway/`, listens on `:8080` |
+| Command-line tools | `pvpctl` (init, publish, seed, query), `oracle` (key generation) | — | `gateway/cmd/` |
+| Frontend | React, TypeScript, Vite, Tailwind CSS | React 19; TypeScript 6; Vite 8; Tailwind CSS 4 | `frontend/`, dev server on `:5180`; needs Node.js 20 or later |
+| Testing | `go test`, integration tests (build tag `integration`), mutation check | — | `scripts/mutation-check.sh`, `Dockerfile.mutation` |
+| Runtime | Docker Desktop with WSL2 (Ubuntu) on Windows 11 | about 10 GB RAM for WSL | 11 network containers (`NOTES.md` E1 to E8) |
+
+## 6. How it works
 
 **One trade**
 
@@ -87,7 +150,7 @@ The Oracle and Auditor orgs are added to the stock two-org test network by `netw
 
 If a payer cannot fund its leg, `SettleTrade` returns `ERR_INSUFFICIENT_FUNDS` before writing anything. No endorsement is produced, the trade stays `MATCHED`, and every balance is unchanged.
 
-## 5. Netting
+## 7. Netting
 
 ### Bilateral netting
 
@@ -101,7 +164,7 @@ The same netting runs across all four ledger accounts: BankIN, BankFX and the si
 
 Every trade must span the two orgs (one side custodied by Org1MSP, the other by Org2MSP). A consequence is that a three-bank cycle in one currency cannot exist: closing it would need a trade between two accounts of the same org, which the chaincode refuses. Four-bank cycles (BankIN to BankFX to BankUS to BankSG and back) can exist and are netted out.
 
-## 6. The liquidity engine
+## 8. The liquidity engine
 
 Netting fails as a whole if any bank cannot fund its net outflow. The liquidity engine resolves that gridlock instead of refusing the batch.
 
@@ -121,13 +184,13 @@ The resolver is a pure function: `PreviewLiquidity` runs exactly the same comput
 
 **Demo data.** `chaincode/pvp/contract/testdata/liquidity_seed.json` defines 16 trades in six scenarios: a four-bank cycle that nets to zero, a four-bank cycle with a residual, a three-bank netting chain, a bilateral pair, a gridlock resolved by dropping one trade, and a total gridlock. The file holds trade definitions only; every INR leg, net payment, dropped trade, cycle and saving shown on screen is computed by the chaincode. A unit test replays every scenario through the chaincode and checks each outcome against figures worked out by hand.
 
-## 7. Security
+## 9. Security
 
 Security is the main feature. Every check runs in the chaincode or in network validation and returns its own error code.
 
 ### Threat matrix
 
-"Unit" means covered by the Go unit tests against the real chaincode code. "Live" means also exercised against the running Drunix network through the gateway; the full integration suite last ran against the liquidity-engine chaincode (`pvp-le`) on 7 October 2026 (section 10).
+"Unit" means covered by the Go unit tests against the real chaincode code. "Live" means also exercised against the running Drunix network through the gateway; the full integration suite last ran against the liquidity-engine chaincode (`pvp-le`) on 7 October 2026 (section 12).
 
 | Attack | What stops it | Code returned | Tested |
 |---|---|---|---|
@@ -183,9 +246,9 @@ We model a bank with valid credentials that attacks. Two controls matter:
 
 ### Checking that the tests catch real bugs
 
-`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. A bug the tests do not catch is reported as a failure. The injected bugs include: the receiver never credited, the funds check removed, signature verification bypassed, the stale-rate window off by one, rounding changed to truncation, netting that sums instead of nets, the single-org check removed from any one of five places, the liquidity resolver choosing the wrong trade or the wrong shortfall, dropped trades marked settled, and the invariant skipped in a liquidity batch. The script first runs the tests on the unmodified copy and aborts if they fail. The current result is in section 10.
+`scripts/mutation-check.sh` copies the chaincode, injects one realistic bug at a time, and reruns the unit tests. A bug the tests do not catch is reported as a failure. The injected bugs include: the receiver never credited, the funds check removed, signature verification bypassed, the stale-rate window off by one, rounding changed to truncation, netting that sums instead of nets, the single-org check removed from any one of five places, the liquidity resolver choosing the wrong trade or the wrong shortfall, dropped trades marked settled, and the invariant skipped in a liquidity batch. The script first runs the tests on the unmodified copy and aborts if they fail. The current result is in section 12.
 
-## 8. Impact and feasibility
+## 10. Impact and feasibility
 
 **Who it is for.** Banks settling USD/INR trades, NPCI as a neutral operator of shared infrastructure, and regulators who want to see what settled, at what rate, and whether value was conserved.
 
@@ -198,11 +261,11 @@ We model a bank with valid credentials that attacks. Two controls matter:
 **Runs today**
 - The Drunix test network (commit `ddc0eae`) locally in Docker on Windows 11 with WSL2: one orderer, two bank orgs each with a lite peer, committing peer and validation server, plus YugabyteDB and KeyDB, and the OracleMSP and AuditorMSP member orgs.
 - Atomic settlement, bilateral netting, the attack scenarios and the audit view were run live through the gateway and frontend in earlier runs, against the `pvp` chaincode.
-- The liquidity engine and four-bank netting run live. They are deployed under a separate chaincode name, `pvp-le`, next to `pvp` on the same channel with the same endorsement policy, so the `pvp` chaincode and its ledger state are untouched. On 7 October 2026 `pvp-le` was deployed, initialised with four ledger banks, seeded with the 16 demo trades, and passed the full integration suite (section 10). The Liquidity screen is built and type-checked; it has not yet been exercised in a browser against the live gateway.
+- The liquidity engine and four-bank netting run live. They are deployed under a separate chaincode name, `pvp-le`, next to `pvp` on the same channel with the same endorsement policy, so the `pvp` chaincode and its ledger state are untouched. On 7 October 2026 `pvp-le` was deployed, initialised with four ledger banks, seeded with the 16 demo trades, and passed the full integration suite (section 12). On 24 October 2026 the Liquidity screen was opened in a browser against the live gateway and a gridlock scenario was previewed (section 3); settling a liquidity batch from the screen has not yet been exercised.
 
 **What a real deployment would need that this prototype does not have:** a real settlement asset such as central bank money or a wholesale CBDC; legal settlement finality, rulebooks and governance between the banks and NPCI; hardware-backed key management with each bank running its own gateway; a governed rate source; real participant onboarding; and regulatory approval.
 
-## 9. What is different
+## 11. What is different
 
 - **INR PvP on a neutral, shared utility.** The ledger runs on NPCI's Drunix: shared infrastructure that no single bank owns.
 - **Interbank and atomic.** The two legs belong to two different banks and move in one ledger transaction.
@@ -213,7 +276,7 @@ We model a bank with valid credentials that attacks. Two controls matter:
 
 **Compared with Citi Token Services (CTS).** From public information, CTS runs on Citi's own network for Citi's clients and focuses on USD and a small set of major currencies. We have not seen INR PvP in it, and we do not claim CTS cannot do PvP. The difference is this: Advait is INR-focused, runs on NPCI's neutral shared infrastructure rather than inside one bank, and puts deterministic attack rejection, on-ledger liquidity resolution and regulator visibility at the centre.
 
-## 10. Verification status
+## 12. Verification status
 
 Results from the run on this branch (raw output is in the branch's final report):
 
@@ -225,9 +288,9 @@ Results from the run on this branch (raw output is in the branch's final report)
 | Frontend (`npm run build`: `tsc -b` and `vite build`) | Builds cleanly |
 | Integration tests (`gateway/integration`, 16 test functions), live Drunix network, chaincode `pvp-le` | 16 of 16 pass: 15 in the standard run (including the four-bank cycle, the gridlock and the balance-scan headroom tests) and the opt-in peer-down test with `RUN_DISRUPTIVE=1` |
 
-**Live run, 7 October 2026.** On the running network, with `pvp` left untouched: `pvp-le` deployed (committed VALID on both peers), initialised with four ledger banks, rate 83.250000 published, and the 16 seed trades instructed by `pvpctl seed` (a second run skipped all 16). Every seed scenario previewed through the gateway gave the figures the unit tests expect. The balance-scan headroom test read the balance scan 25 times on each peer and counted exactly 8 rows every time. **Not yet exercised:** the Liquidity screen in a browser against the live gateway.
+**Live run, 7 October 2026.** On the running network, with `pvp` left untouched: `pvp-le` deployed (committed VALID on both peers), initialised with four ledger banks, rate 83.250000 published, and the 16 seed trades instructed by `pvpctl seed` (a second run skipped all 16). Every seed scenario previewed through the gateway gave the figures the unit tests expect. The balance-scan headroom test read the balance scan 25 times on each peer and counted exactly 8 rows every time. **Browser check, 24 October 2026:** every screen loaded against the live gateway (`pvp-le`), and the netting and liquidity previews returned the expected figures (screenshots in section 3). **Not yet exercised:** settling a liquidity batch from the Liquidity screen.
 
-## 11. How to run
+## 13. How to run
 
 These are the commands we ran for steps 1 to 8. Run them inside WSL (Ubuntu) as root. First point `ADVAITA` at your checkout:
 ```bash
@@ -334,7 +397,7 @@ CHAINCODE_NAME=pvp-le bash scripts/run-gateway.sh                         # stop
 cd "$ADVAITA"/gateway && CHAINCODE_NAME=pvp-le go test -tags integration ./integration/ -count=1 -v
 ```
 
-## 12. Limitations and future work
+## 14. Limitations and future work
 
 **Limitations**
 - **Single network only.** Both bank orgs are on one Drunix network. There is no atomicity across separate networks.
