@@ -4,7 +4,7 @@
 
 Payment-versus-payment settlement for USD/INR trades on NPCI's Drunix ledger: neither currency leg moves unless both do.
 
-**[Demo video](https://drive.google.com/drive/folders/1rLhT8HK3OfQV2QEUr6VbyXWv4MX09MCC?usp=sharing)** · [Screenshots](#3-screenshots)
+**[Demo video](https://drive.google.com/drive/folders/1rLhT8HK3OfQV2QEUr6VbyXWv4MX09MCC?usp=sharing)** · **[Submission deck (PDF)](https://drive.google.com/file/d/1LbntfaS4_uUZ-fBo0u_z1SYy0cD2LUSm/view?usp=sharing)** · [Screenshots](#3-screenshots)
 
 </div>
 
